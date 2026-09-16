@@ -331,13 +331,27 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
   <p>Dans <strong>Modules &amp; dossiers → État des modules</strong>, cliquer sur <strong>Supprimer…</strong>. Le
     dashboard présente séparément le dossier du module, ses configurations actives détectées et les éventuels
     scripts SQL de désinstallation. Choisir les éléments voulus, relire le récapitulatif, puis saisir exactement
-    le nom du module pour confirmer. Les configurations actives sélectionnées sont sauvegardées avant suppression.</p>
+    le nom du module pour confirmer. Les configurations actives sélectionnées, y compris les éventuels modèles
+    <code>.conf.dist</code> correspondants, sont sauvegardées avant suppression. Le dossier du module est supprimé
+    avec une gestion spécifique des fichiers Git en lecture seule sous Windows ; toute impossibilité est affichée.</p>
   <div class="danger">
     Le nettoyage SQL est désactivé par défaut et modifie réellement la base. Il n'est proposé que lorsqu'un script
     dont le nom indique explicitement une désinstallation (<code>uninstall</code>, <code>remove</code>,
-    <code>delete</code> ou <code>drop</code>) se trouve sous le dossier SQL d'une base identifiable. Lire ce script
+    <code>delete</code> ou <code>drop</code>) se trouve sous <code>sql/</code> ou <code>data/sql/</code>, dans le
+    dossier d'une base identifiable. Si le module contient seulement des scripts d'installation ou de mise à jour,
+    l'assistant peut proposer des nettoyages strictement bornés : suppression d'une table créée par le module ou
+    suppression de clés précises que le script réinsère. Ces propositions sont signalées comme déduites, affichées
+    intégralement et désactivées par défaut. Les opérations non bornées et les <code>ALTER TABLE</code> ne sont jamais
+    inversés automatiquement. Lire tout script de désinstallation
     et effectuer une sauvegarde DB avant de confirmer : le dashboard ne peut pas annuler son exécution. Si un script
     SQL échoue, le dossier du module est conservé. Après toute suppression de module, lancer un rebuild.
+  </div>
+  <div class="note">
+    Pour exécuter une proposition déduite, sélectionner chaque bloc voulu, relire le SQL et recopier la phrase de
+    confirmation renforcée. Le backend recalcule le plan avant l'exécution et refuse un identifiant périmé. Il exporte
+    d'abord chaque table concernée avec <code>mysqldump</code> dans <code>db-backups/module-removal</code>. Si cette
+    sauvegarde échoue, aucun SQL déduit n'est exécuté et le dossier du module est conservé. L'utilisateur peut aussi
+    copier une proposition sans l'exécuter ou choisir <strong>Conserver tout le SQL</strong>.
   </div>
 
   <div class="note">

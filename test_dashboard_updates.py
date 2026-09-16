@@ -28,6 +28,14 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn("showModuleInstallError(button,e.message)", html)
         self.assertIn("role','alert", html)
 
+    def test_sql_removal_assistant_requires_review_and_strong_confirmation(self):
+        html = Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="sqlAssistant"', html)
+        self.assertIn("Rien n'est présélectionné", html)
+        self.assertIn("SUPPRIMER SQL ${sqlAssistantName}", html)
+        self.assertIn("inferred_sql_ids:sqlChoice.inferredSqlIds", html)
+
 
 class DashboardUpdateTests(unittest.TestCase):
     def setUp(self):
@@ -313,7 +321,94 @@ class RemoveModuleTests(unittest.TestCase):
             plan = dashboard.module_removal_plan("mod-example")
 
         self.assertEqual(plan["configs"], ["example.conf"])
-        self.assertEqual(plan["sql"], [{"path": "sql/db-world/uninstall.sql", "database": "acore_world"}])
+        self.assertEqual(plan["sql"], [{"path": "sql/db-world/uninstall.sql", "database": "acore_world",
+                                        "content": "DELETE FROM example;"}])
+        self.assertEqual(plan["sql_notice"], "")
+
+    def test_plan_explains_current_data_sql_without_uninstall_script(self):
+        sql = self.module / "data" / "sql"
+        (sql / "db-world" / "base").mkdir(parents=True)
+        (sql / "db-world" / "base" / "mod_example.sql").write_text(
+            "DELETE FROM command WHERE name = 'example';\nINSERT INTO command VALUES (...);",
+            encoding="utf-8",
+        )
+        (sql / "db-characters" / "base").mkdir(parents=True)
+        (sql / "db-characters" / "base" / "create_example.sql").write_text(
+            "CREATE TABLE example (id INT);", encoding="utf-8"
+        )
+
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            plan = dashboard.module_removal_plan("mod-example")
+
+        self.assertEqual(plan["sql"], [])
+        self.assertIn("2 script(s) SQL", plan["sql_notice"])
+        self.assertIn("1 proposition(s) de nettoyage", plan["sql_notice"])
+        self.assertEqual(plan["inferred_sql"][0]["sql"], "DROP TABLE IF EXISTS `example`;")
+        self.assertEqual(plan["inferred_sql"][0]["risk"], "high")
+
+    def test_plan_infers_bounded_individual_xp_cleanup(self):
+        sql = self.module / "data" / "sql"
+        world = sql / "db-world" / "base" / "commands.sql"
+        world.parent.mkdir(parents=True)
+        world.write_text(
+            "DELETE FROM `command` WHERE `name` IN ('xp', 'xp set');\n"
+            "INSERT INTO `command` (`name`) VALUES ('xp');",
+            encoding="utf-8",
+        )
+        strings = sql / "db-world" / "updates" / "strings.sql"
+        strings.parent.mkdir(parents=True)
+        strings.write_text(
+            "SET @ENTRY:=100000;\n"
+            "DELETE FROM `acore_string` WHERE `entry` BETWEEN @ENTRY+0 AND @ENTRY+9;\n"
+            "INSERT INTO `acore_string` (`entry`) VALUES (@ENTRY+0);",
+            encoding="utf-8",
+        )
+        characters = sql / "db-characters" / "base" / "table.sql"
+        characters.parent.mkdir(parents=True)
+        characters.write_text(
+            "CREATE TABLE IF NOT EXISTS `individualxp` (`CharacterGUID` INT);",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            plan = dashboard.module_removal_plan("mod-example")
+
+        self.assertEqual(len(plan["inferred_sql"]), 3)
+        by_table = {item["tables"][0]: item for item in plan["inferred_sql"]}
+        self.assertEqual(by_table["command"]["database"], "acore_world")
+        self.assertIn("'xp', 'xp set'", by_table["command"]["sql"])
+        self.assertIn("SET @ENTRY:=100000", by_table["acore_string"]["sql"])
+        self.assertEqual(by_table["individualxp"]["database"], "acore_characters")
+        self.assertEqual(by_table["individualxp"]["risk"], "high")
+
+    def test_plan_does_not_infer_unbounded_delete_or_alter(self):
+        script = self.module / "data" / "sql" / "db-world" / "base" / "unsafe.sql"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "DELETE FROM command WHERE security >= 0;\n"
+            "INSERT INTO command VALUES ('x');\nALTER TABLE command ADD COLUMN unsafe INT;",
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            plan = dashboard.module_removal_plan("mod-example")
+
+        self.assertEqual(plan["inferred_sql"], [])
+
+    def test_plan_accepts_explicit_uninstall_in_current_data_sql_layout(self):
+        uninstall = self.module / "data" / "sql" / "db-characters" / "base" / "uninstall.sql"
+        uninstall.parent.mkdir(parents=True)
+        uninstall.write_text("DROP TABLE individualxp;", encoding="utf-8")
+
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            plan = dashboard.module_removal_plan("mod-example")
+
+        self.assertEqual(plan["sql"], [{
+            "path": "data/sql/db-characters/base/uninstall.sql",
+            "database": "acore_characters",
+            "content": "DROP TABLE individualxp;",
+        }])
+        self.assertEqual(plan["sql_notice"], "")
 
     def test_removal_requires_exact_name_confirmation(self):
         result = dashboard.remove_local_module("mod-example", confirmation="yes")
@@ -323,13 +418,65 @@ class RemoveModuleTests(unittest.TestCase):
     def test_removal_deletes_folder_without_touching_optional_artifacts(self):
         with mock.patch.object(dashboard, "list_active_configs", return_value=[{"path": "example.conf"}]), \
                 mock.patch.object(dashboard, "read_active_config") as read_config, \
-                mock.patch.object(dashboard, "_execute_module_uninstall_sql") as sql:
+                mock.patch.object(dashboard, "_execute_module_uninstall_sql") as sql, \
+                mock.patch.object(dashboard, "_remove_temporary_tree",
+                                  wraps=dashboard._remove_temporary_tree) as remove_tree:
             result = dashboard.remove_local_module("mod-example", confirmation="mod-example")
 
         self.assertTrue(result["ok"], result["output"])
         self.assertFalse(self.module.exists())
+        remove_tree.assert_called_once_with(self.module)
         read_config.assert_not_called()
         sql.assert_not_called()
+
+    def test_plan_and_removal_include_active_conf_and_conf_dist(self):
+        active = [{"path": "example.conf"}, {"path": "example.conf.dist"}]
+        with mock.patch.object(dashboard, "list_active_configs", return_value=active), \
+                mock.patch.object(dashboard, "read_active_config", side_effect=["active", "template"]), \
+                mock.patch.object(dashboard, "backup_text") as backup, \
+                mock.patch.object(dashboard, "run", return_value={"ok": True, "code": 0, "output": ""}) as run:
+            plan = dashboard.module_removal_plan("mod-example")
+            result = dashboard.remove_local_module(
+                "mod-example", remove_configs=True, confirmation="mod-example"
+            )
+
+        self.assertEqual(plan["configs"], ["example.conf", "example.conf.dist"])
+        self.assertTrue(result["ok"], result["output"])
+        self.assertEqual(backup.call_count, 2)
+        removed_paths = [call.args[0][-1] for call in run.call_args_list]
+        self.assertEqual(removed_paths, [
+            f"{dashboard.ACTIVE_CONF_DIR}/example.conf",
+            f"{dashboard.ACTIVE_CONF_DIR}/example.conf.dist",
+        ])
+        self.assertFalse(self.module.exists())
+
+    def test_active_config_listing_includes_conf_dist(self):
+        copied = self.root / "active-copy"
+        copied.mkdir()
+
+        def fake_copy(command, timeout=0):
+            destination = Path(command[-1])
+            (destination / "example.conf").write_text("active", encoding="utf-8")
+            (destination / "example.conf.dist").write_text("template", encoding="utf-8")
+            (destination / "ignored.txt").write_text("ignored", encoding="utf-8")
+            return {"ok": True, "code": 0, "output": ""}
+
+        with mock.patch.object(dashboard, "docker_available", return_value=True), \
+                mock.patch.object(dashboard, "container_exists", return_value=True), \
+                mock.patch.object(dashboard.tempfile, "mkdtemp", return_value=str(copied)), \
+                mock.patch.object(dashboard, "run", side_effect=fake_copy):
+            configs = dashboard.list_active_configs()
+
+        self.assertEqual([item["path"] for item in configs], ["example.conf", "example.conf.dist"])
+
+    def test_folder_removal_error_is_reported_instead_of_claiming_success(self):
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]), \
+                mock.patch.object(dashboard, "_remove_temporary_tree", return_value="locked .git file"):
+            result = dashboard.remove_local_module("mod-example", confirmation="mod-example")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("locked .git file", result["output"])
+        self.assertTrue(self.module.exists())
 
     def test_sql_request_without_safe_uninstall_script_preserves_module(self):
         with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
@@ -338,6 +485,70 @@ class RemoveModuleTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("Aucun script SQL", result["output"])
         self.assertTrue(self.module.is_dir())
+
+    def test_inferred_sql_requires_current_id_and_strong_confirmation(self):
+        script = self.module / "data" / "sql" / "db-characters" / "base" / "table.sql"
+        script.parent.mkdir(parents=True)
+        script.write_text("CREATE TABLE individualxp (id INT);", encoding="utf-8")
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            proposal = dashboard.module_removal_plan("mod-example")["inferred_sql"][0]
+            missing_confirmation = dashboard.remove_local_module(
+                "mod-example", inferred_sql_ids=[proposal["id"]], confirmation="mod-example"
+            )
+            stale = dashboard.remove_local_module(
+                "mod-example", inferred_sql_ids=["stale-id"],
+                sql_confirmation="SUPPRIMER SQL mod-example", confirmation="mod-example"
+            )
+
+        self.assertFalse(missing_confirmation["ok"])
+        self.assertIn("Confirmation SQL invalide", missing_confirmation["output"])
+        self.assertFalse(stale["ok"])
+        self.assertIn("plan SQL a changé", stale["output"])
+        self.assertTrue(self.module.is_dir())
+
+    def test_inferred_id_changes_when_its_source_file_changes(self):
+        script = self.module / "data" / "sql" / "db-characters" / "base" / "table.sql"
+        script.parent.mkdir(parents=True)
+        script.write_text("CREATE TABLE individualxp (id INT);", encoding="utf-8")
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            before = dashboard.module_removal_plan("mod-example")["inferred_sql"][0]["id"]
+            script.write_text("-- changed\nCREATE TABLE individualxp (id INT);", encoding="utf-8")
+            after = dashboard.module_removal_plan("mod-example")["inferred_sql"][0]["id"]
+
+        self.assertNotEqual(before, after)
+
+    def test_failed_table_backup_prevents_inferred_sql_execution(self):
+        proposal = {"database": "acore_characters", "tables": ["individualxp"],
+                    "sql": "DROP TABLE individualxp;", "title": "Drop"}
+        failed = mock.Mock(returncode=1, stdout=b"", stderr=b"dump failed")
+        with mock.patch.object(dashboard, "docker_available", return_value=True), \
+                mock.patch.object(dashboard, "container_running", return_value=True), \
+                mock.patch.object(dashboard.subprocess, "run", return_value=failed) as run:
+            with self.assertRaisesRegex(RuntimeError, "aucun SQL déduit n'a été exécuté"):
+                dashboard._execute_inferred_sql("mod-example", [proposal])
+
+        run.assert_called_once()
+        self.assertIn("mysqldump", run.call_args.args[0])
+
+    def test_selected_inferred_sql_is_backed_up_before_folder_removal(self):
+        script = self.module / "data" / "sql" / "db-characters" / "base" / "table.sql"
+        script.parent.mkdir(parents=True)
+        script.write_text("CREATE TABLE individualxp (id INT);", encoding="utf-8")
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]), \
+                mock.patch.object(dashboard, "_backup_inferred_sql_tables", return_value=Path("backup")) as backup, \
+                mock.patch.object(dashboard, "_execute_inferred_sql", return_value=Path("backup")) as execute:
+            proposal = dashboard.module_removal_plan("mod-example")["inferred_sql"][0]
+            result = dashboard.remove_local_module(
+                "mod-example", inferred_sql_ids=[proposal["id"]],
+                sql_confirmation="SUPPRIMER SQL mod-example", confirmation="mod-example"
+            )
+
+        self.assertTrue(result["ok"], result["output"])
+        backup.assert_called_once()
+        execute.assert_called_once()
+        self.assertEqual(execute.call_args.args[1][0]["id"], proposal["id"])
+        self.assertEqual(execute.call_args.kwargs["backup"], Path("backup"))
+        self.assertFalse(self.module.exists())
 
 
 class UpdateModuleTests(unittest.TestCase):

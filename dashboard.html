@@ -23,6 +23,7 @@ select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;
 .placeholder{opacity:.62;position:relative}.placeholder:after{content:"À venir";position:absolute;top:12px;right:12px;border:1px solid #526070;border-radius:999px;padding:2px 8px;color:#9aabba;font-size:11px}
 .visual-list{margin-top:14px;display:grid;gap:8px}.visual-row{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(220px,1fr);gap:10px;align-items:start;padding:10px;background:#0e1620;border:1px solid #213043;border-radius:10px}.visual-key{font-family:Consolas,monospace;color:#9fd0ff;word-break:break-word}.visual-comment{grid-column:1/-1;color:#8497aa;font-size:12px}.visual-row input{width:100%}
 .searchbox{width:100%;margin:8px 0}.option-list{display:grid;gap:8px;max-height:520px;overflow:auto}.option{border:1px solid #26374b;background:#0d151e;border-radius:10px;padding:10px}.option-head{display:flex;justify-content:space-between;gap:10px}.option code{color:#9fd0ff}.option .desc{color:#8fa1b3;font-size:12px;margin:5px 0}.option-controls{display:flex;gap:8px;align-items:center}.option-controls input{flex:1}
+.sql-dialog{width:min(980px,94vw);max-height:90vh;border:1px solid #41546b;border-radius:15px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 20px 70px #000b}.sql-dialog::backdrop{background:#02060bd9}.sql-dialog-body{padding:20px;overflow:auto;max-height:90vh}.sql-dialog h2{margin:0 0 6px;color:#f0d584}.sql-choices{display:grid;gap:10px;margin:14px 0}.sql-choice{border:1px solid #314257;background:#0d151e;border-radius:10px;padding:12px}.sql-choice.high{border-color:#84404a}.sql-choice-head{display:flex;gap:10px;align-items:start}.sql-choice-head input{margin-top:4px}.sql-choice label{flex:1;cursor:pointer}.risk{display:inline-block;border:1px solid #765e33;border-radius:999px;padding:1px 7px;color:#ffd58b;font-size:11px;margin-left:6px}.risk.high{border-color:#8a414a;color:#ff9ba4}.sql-choice details{margin:9px 0 0 27px}.sql-choice pre{max-height:180px;margin:8px 0}.sql-confirm{display:grid;gap:6px;margin:14px 0;padding:12px;border-left:3px solid var(--red);background:#21141a}.sql-confirm input{width:100%}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:-20px;background:var(--panel);padding:12px 0 0}
 @media(max-width:900px){.two{grid-template-columns:1fr}.visual-row{grid-template-columns:1fr}header{align-items:start;flex-direction:column}.topright{align-items:flex-start}}
 </style>
 </head>
@@ -160,6 +161,20 @@ select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;
 </div></section>
 </div>
 
+<dialog id="sqlAssistant" class="sql-dialog" aria-labelledby="sqlAssistantTitle">
+  <div class="sql-dialog-body">
+    <h2 id="sqlAssistantTitle">Assistant de suppression SQL</h2>
+    <p class="muted" id="sqlAssistantIntro"></p>
+    <div class="notice"><strong>Rien n'est présélectionné.</strong> Les propositions déduites ne sont pas des scripts officiels. Chaque table visée par une proposition déduite sera exportée dans <code>db-backups</code> avant toute exécution.</div>
+    <div id="sqlAssistantChoices" class="sql-choices"></div>
+    <div id="sqlAssistantConfirm" class="sql-confirm" hidden></div>
+    <div class="dialog-actions">
+      <button class="btn" data-tip="Ferme l'assistant et conserve toutes les données SQL." onclick="closeSqlAssistant(false)">Conserver tout le SQL</button>
+      <button id="sqlAssistantContinue" class="btn danger" data-tip="Valide uniquement les nettoyages cochés et poursuit vers la confirmation finale du module." onclick="closeSqlAssistant(true)">Continuer avec la sélection</button>
+    </div>
+  </div>
+</dialog>
+
 <script>
 const $=s=>document.querySelector(s);
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
@@ -230,17 +245,38 @@ async function updateModule(name,button){
   button.disabled=true;button.textContent='Mise à jour…';
   try{const o=await api('/api/modules/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');show(o);updatesLoaded=false;await refreshUpdates(true)}catch(e){button.disabled=false;button.textContent='Réessayer';show({output:e.message})}
 }
+let sqlAssistantResolve=null,sqlAssistantName='';
+function selectedSqlAssistantItems(){return [...document.querySelectorAll('#sqlAssistantChoices input[type=checkbox]:checked')]}
+function refreshSqlAssistantConfirmation(){
+  const inferred=selectedSqlAssistantItems().some(x=>x.dataset.kind==='inferred'),box=$('#sqlAssistantConfirm'),button=$('#sqlAssistantContinue'),saved=box.dataset.value||'';
+  box.hidden=!inferred;
+  if(inferred){const phrase=`SUPPRIMER SQL ${sqlAssistantName}`;box.innerHTML=`<strong>Confirmation renforcée requise</strong><span>Recopiez exactement <code>${esc(phrase)}</code> pour autoriser les propositions déduites.</span><input id="sqlAssistantPhrase" autocomplete="off" aria-label="Confirmation du nettoyage SQL déduit">`;const input=$('#sqlAssistantPhrase');input.value=saved;input.oninput=()=>{box.dataset.value=input.value;button.disabled=input.value!==phrase};button.disabled=saved!==phrase}
+  else{box.dataset.value='';button.disabled=false}
+}
+function copySqlProposal(id){const item=document.getElementById(id);navigator.clipboard.writeText(item.textContent).then(()=>show({output:'SQL copié dans le presse-papiers.'})).catch(e=>show({output:'Copie impossible: '+e.message}))}
+function openSqlAssistant(name,plan){
+  sqlAssistantName=name;const dialog=$('#sqlAssistant'),box=$('#sqlAssistantChoices'),official=plan.sql||[],inferred=plan.inferred_sql||[];$('#sqlAssistantIntro').textContent=`${official.length} script(s) officiel(s) et ${inferred.length} proposition(s) déduite(s) pour ${name}. Examinez chaque action séparément.`;box.innerHTML='';$('#sqlAssistantConfirm').dataset.value='';
+  if(official.length){const row=document.createElement('div');row.className='sql-choice';row.innerHTML=`<div class="sql-choice-head"><input type="checkbox" id="official-sql" data-kind="official" onchange="refreshSqlAssistantConfirmation()"><label for="official-sql"><strong>${official.length} script(s) officiel(s) de désinstallation</strong><div class="module-meta">Contenu fourni par le module</div></label></div>${official.map((item,index)=>`<details><summary>${esc(item.path)} → ${esc(item.database)}</summary><pre id="official-sql-${index}">${esc(item.content||'Prévisualisation indisponible.')}</pre><button class="btn" data-tip="Copie ce script officiel sans l'exécuter." onclick="copySqlProposal('official-sql-${index}')">Copier ce SQL</button></details>`).join('')}`;box.appendChild(row)}
+  inferred.forEach((item,index)=>{const codeId=`inferred-sql-${index}`,row=document.createElement('div');row.className=`sql-choice ${item.risk==='high'?'high':''}`;row.innerHTML=`<div class="sql-choice-head"><input type="checkbox" id="inferred-${index}" data-kind="inferred" data-id="${escAttr(item.id)}" onchange="refreshSqlAssistantConfirmation()"><label for="inferred-${index}"><strong>${esc(item.title)}</strong><span class="risk ${item.risk==='high'?'high':''}">${item.risk==='high'?'RISQUE ÉLEVÉ':'RISQUE MOYEN'}</span><div class="module-meta">${esc(item.database)} · déduit de ${esc(item.source)}</div><div class="module-description">${esc(item.explanation)}</div></label></div><details><summary>Examiner le SQL proposé</summary><pre id="${codeId}">${esc(item.sql)}</pre><button class="btn" data-tip="Copie uniquement cette proposition SQL sans l'exécuter." onclick="copySqlProposal('${codeId}')">Copier ce SQL</button></details>`;box.appendChild(row)});
+  if(!official.length&&!inferred.length)box.innerHTML=`<div class="notice">${esc(plan.sql_notice||'Aucun nettoyage SQL sûr ou borné n’a pu être proposé. Les données SQL seront conservées.')}</div>`;
+  refreshSqlAssistantConfirmation();dialog.oncancel=e=>{e.preventDefault();closeSqlAssistant(false)};dialog.showModal();return new Promise(resolve=>{sqlAssistantResolve=resolve})
+}
+function closeSqlAssistant(useSelection){
+  const dialog=$('#sqlAssistant'),selected=useSelection?selectedSqlAssistantItems():[],inferred=selected.filter(x=>x.dataset.kind==='inferred').map(x=>x.dataset.id),official=selected.some(x=>x.dataset.kind==='official'),phrase=inferred.length?($('#sqlAssistantPhrase')?.value||''):'';
+  if(useSelection&&inferred.length&&phrase!==`SUPPRIMER SQL ${sqlAssistantName}`)return;
+  dialog.close();const resolve=sqlAssistantResolve;sqlAssistantResolve=null;if(resolve)resolve({removeSql:official,inferredSqlIds:inferred,sqlConfirmation:phrase})
+}
 async function removeModule(name,button){
   button.disabled=true;button.textContent='Analyse…';
   try{
     const result=await api('/api/modules/removal-plan?name='+encodeURIComponent(name));if(!result.ok)throw new Error(result.output||'Analyse impossible');const p=result.plan;
-    const configs=p.configs||[],sql=p.sql||[];
+    const configs=p.configs||[],sql=p.sql||[],sqlChoice=await openSqlAssistant(name,p);
     const removeConfigs=configs.length&&confirm(`Supprimer aussi ${configs.length} configuration(s) active(s) ?\n\n${configs.join('\n')}\n\nUne sauvegarde sera créée avant leur suppression.`);
-    const removeSql=sql.length&&confirm(`OPTION DANGEREUSE — supprimer aussi les données SQL de ${name} ?\n\nSeuls ces scripts de désinstallation explicites seront exécutés :\n${sql.map(x=>x.path+' → '+x.database).join('\n')}\n\nCette modification de base de données n'est pas annulable par le dashboard. Annuler conserve le SQL.`);
-    const choices=[`Dossier : ${p.folder}`,removeConfigs?`Configs : ${configs.join(', ')}`:'Configs actives : conservées',removeSql?`SQL : ${sql.map(x=>x.path).join(', ')}`:'SQL : conservé'].join('\n');
+    const sqlCount=(sqlChoice.removeSql?sql.length:0)+sqlChoice.inferredSqlIds.length;
+    const choices=[`Dossier : ${p.folder}`,removeConfigs?`Configs : ${configs.join(', ')}`:'Configs actives : conservées',sqlCount?`SQL : ${sqlCount} nettoyage(s) sélectionné(s)`:'SQL : conservé'].join('\n');
     const confirmation=prompt(`SUPPRESSION DÉFINITIVE\n\n${choices}\n\nUn rebuild sera nécessaire. Pour confirmer exactement ces suppressions, saisissez : ${name}`,'');
     if(confirmation!==name){button.disabled=false;button.textContent='Supprimer…';return}
-    button.textContent='Suppression…';const o=await api('/api/modules/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,remove_configs:!!removeConfigs,remove_sql:!!removeSql,confirmation})});if(!o.ok)throw new Error(o.output||'Suppression impossible');show(o);catalogue.forEach(x=>{if(x.name===name)x.installed=false});renderCatalogue();updatesLoaded=false;await refreshUpdates(true)
+    button.textContent='Suppression…';const o=await api('/api/modules/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,remove_configs:!!removeConfigs,remove_sql:sqlChoice.removeSql,inferred_sql_ids:sqlChoice.inferredSqlIds,sql_confirmation:sqlChoice.sqlConfirmation,confirmation})});if(!o.ok)throw new Error(o.output||'Suppression impossible');show(o);catalogue.forEach(x=>{if(x.name===name)x.installed=false});renderCatalogue();updatesLoaded=false;await refreshUpdates(true)
   }catch(e){button.disabled=false;button.textContent='Réessayer';show({output:e.message})}
 }
 async function refreshLogs(n){const o=await api('/api/logs?tail='+n);$('#logsBox').textContent=o.output||''}setInterval(()=>{if($('#autoLogs')?.checked)refreshLogs(200)},5000);
