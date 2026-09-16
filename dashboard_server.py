@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
+import re
 import shutil
 import subprocess
 import tempfile
@@ -43,9 +44,15 @@ FORBIDDEN_UPDATE_ROOTS = frozenset((
     "docker", "docker-data", "data", "mysql-data",
 ))
 UPDATE_CACHE_SECONDS = 300
+CATALOGUE_URL = "https://raw.githubusercontent.com/azerothcore/azerothcore.github.io/master/data/catalogue.json"
+CATALOGUE_PAGE = "https://www.azerothcore.org/catalogue.html#/"
+MAX_CATALOGUE_BYTES = 5 * 1024 * 1024
 _archive_cache = {}
 _archive_cache_lock = threading.Lock()
 _dashboard_update_lock = threading.Lock()
+_module_install_lock = threading.Lock()
+_catalogue_cache = None
+_catalogue_cache_time = 0.0
 
 def run(cmd, timeout=45, shell=False):
     try:
@@ -263,6 +270,97 @@ def module_update_statuses():
             "source": f"https://github.com/{MODULES_REPO}",
         })
     return result
+
+
+def catalogue_modules(force=False):
+    """Return installable C++ modules from AzerothCore's curated catalogue."""
+    global _catalogue_cache, _catalogue_cache_time
+    now = time.monotonic()
+    if _catalogue_cache is not None and not force and now - _catalogue_cache_time < UPDATE_CACHE_SECONDS:
+        return [dict(item, installed=(PROJECT_ROOT / "modules" / item["name"]).is_dir()) for item in _catalogue_cache]
+
+    request = urllib.request.Request(CATALOGUE_URL, headers={"User-Agent": "AzerothCore-Local-Dashboard"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = response.read(MAX_CATALOGUE_BYTES + 1)
+    if len(payload) > MAX_CATALOGUE_BYTES:
+        raise RuntimeError("Catalogue AzerothCore trop volumineux.")
+    try:
+        document = json.loads(payload.decode("utf-8"))
+        entries = document["organizations"]["azerothcore"]["azerothcore-module"]
+    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as e:
+        raise RuntimeError(f"Format du catalogue AzerothCore invalide: {e}") from e
+    if not isinstance(entries, list):
+        raise RuntimeError("La liste des modules du catalogue est invalide.")
+
+    modules = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        full_name = entry.get("full_name", "")
+        name = entry.get("name", "")
+        branch = entry.get("default_branch", "")
+        topics = entry.get("topics", [])
+        # Only conventional GitHub-hosted C++ modules are eligible. Tools, Lua and
+        # SQL catalogue entries intentionally remain manual installs.
+        if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name)
+                or not re.fullmatch(r"mod-[A-Za-z0-9_.-]+", name)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch)
+                or ".." in branch.split("/")
+                or "azerothcore-module" not in topics
+                or entry.get("archived") is True or entry.get("disabled") is True):
+            continue
+        modules.append({
+            "name": name,
+            "full_name": full_name,
+            "description": str(entry.get("description") or "")[:500],
+            "branch": branch,
+            "source": f"https://github.com/{full_name}",
+            "stars": int(entry.get("stargazers_count") or 0),
+        })
+    modules.sort(key=lambda item: (-item["stars"], item["name"].casefold()))
+    _catalogue_cache, _catalogue_cache_time = modules, now
+    return [dict(item, installed=(PROJECT_ROOT / "modules" / item["name"]).is_dir()) for item in modules]
+
+
+def install_catalogue_module(full_name):
+    """Clone one validated catalogue module atomically into PROJECT_ROOT/modules."""
+    if not _module_install_lock.acquire(blocking=False):
+        return {"ok": False, "code": -1, "output": "Une installation de module est déjà en cours."}
+    stage_root = None
+    try:
+        matches = [item for item in catalogue_modules(force=True) if item["full_name"] == full_name]
+        if len(matches) != 1:
+            raise ValueError("Ce dépôt n'est pas un module C++ installable du catalogue AzerothCore.")
+        module = matches[0]
+        modules_root = PROJECT_ROOT / "modules"
+        modules_root.mkdir(parents=True, exist_ok=True)
+        destination = modules_root / module["name"]
+        if any(child.name.casefold() == module["name"].casefold() for child in modules_root.iterdir()):
+            raise FileExistsError(f"Un dossier nommé {module['name']} existe déjà dans modules.")
+
+        stage_root = Path(tempfile.mkdtemp(prefix=".dashboard-install-", dir=modules_root))
+        staged = stage_root / module["name"]
+        result = run([
+            "git", "clone", "--depth", "1", "--single-branch", "--branch", module["branch"],
+            module["source"] + ".git", str(staged),
+        ], timeout=180)
+        if not result["ok"]:
+            raise RuntimeError("git clone a échoué; aucun module n'a été installé.\n\n" + result["output"])
+        if not (staged / "CMakeLists.txt").is_file():
+            raise RuntimeError("Le dépôt ne contient pas de CMakeLists.txt à sa racine; installation annulée.")
+        os.replace(staged, destination)
+        return {
+            "ok": True,
+            "code": 0,
+            "output": f"{module['name']} installé depuis {module['source']}. Lancez maintenant un Rebuild AzerothCore.",
+            "module": module,
+        }
+    except Exception as e:
+        return {"ok": False, "code": -1, "output": str(e)}
+    finally:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        _module_install_lock.release()
 
 
 def install_dashboard_update():
@@ -714,6 +812,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send_json({"ok": False, "output": f"Vérification impossible: {e}"}, 502)
 
+        if u.path == "/api/modules/catalogue":
+            try:
+                modules = catalogue_modules(force=q.get("refresh", ["0"])[0] == "1")
+                return self.send_json({"ok": True, "source": CATALOGUE_PAGE, "modules": modules})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": f"Catalogue indisponible: {e}"}, 502)
+
         if u.path == "/api/logs":
             tail = max(20, min(1000, int(q.get("tail", ["200"])[0])))
             r = run(["docker", "compose", "logs", f"--tail={tail}", "ac-worldserver"], timeout=20)
@@ -775,6 +880,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"ok": False, "output": "Confirmation explicite manquante."}, 400)
             result = install_dashboard_update()
             return self.send_json(result, 200 if result["ok"] else 500)
+
+        if u.path == "/api/modules/install":
+            if data.get("confirmed") is not True:
+                return self.send_json({"ok": False, "output": "Confirmation explicite manquante."}, 400)
+            full_name = str(data.get("full_name", "")).strip()
+            result = install_catalogue_module(full_name)
+            return self.send_json(result, 200 if result["ok"] else 400)
 
         if u.path == "/api/config":
             source = data.get("source", "host")

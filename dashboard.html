@@ -15,6 +15,7 @@ section{display:none}section.active{display:block}.grid{display:grid;grid-templa
 .card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:0 8px 30px #0004}.card h2,.card h3{margin:0 0 8px}
 .statusrow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #223040}.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:7px;background:#667}.dot.ok{background:var(--green)}.dot.bad{background:var(--red)}
 .updatebar{display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--line);border-radius:11px;background:#101923}.dot.warn{background:var(--orange)}.module-list{display:grid;gap:8px;margin-top:12px}.module-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border:1px solid #26374b;background:#0d151e;border-radius:10px}.module-meta{font-size:12px;color:var(--muted);word-break:break-all}.state{white-space:nowrap}.btn:disabled{opacity:.55;cursor:not-allowed}
+.catalogue-controls{display:flex;gap:8px}.catalogue-controls input{flex:1;min-width:0;background:#0b121a;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px}.catalogue-list{max-height:480px;overflow:auto}.module-description{margin-top:4px;color:var(--muted);font-size:12px}.module-row .actions{flex:0 0 auto}
 .actions,.toolbar{display:flex;flex-wrap:wrap;gap:8px}.btn{display:inline-block;text-decoration:none;border:1px solid #33465b;background:#182536;color:#e8f0f8;padding:9px 12px;border-radius:9px;cursor:pointer}.btn:hover{background:#22344a}.btn.warn{border-color:#6e562e}.btn.danger{border-color:#6b3139}
 pre,.console{background:#070b10;border:1px solid #1e2a38;border-radius:11px;padding:12px;color:#cfe3f9;white-space:pre-wrap;overflow:auto;font-family:Consolas,monospace;max-height:430px}
 select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;border-radius:9px;padding:9px}textarea{width:100%;min-height:330px;font:13px/1.45 Consolas,monospace;resize:vertical}.configline{display:flex;gap:8px;align-items:center}.configline select{flex:1}
@@ -134,6 +135,7 @@ select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;
 <button class="btn" data-tip="Lance le patch de restriction selfbot sur les sources Playerbots." onclick="act('patch_selfbot')">apply-playerbots-selfbot-lock.ps1</button>
 </div></div>
 <div class="card"><h2>État des modules</h2><p class="muted">Vérification seule : aucun module n'est modifié. Un clone Git indépendant utilise son propre dépôt distant ; sinon la comparaison utilise le dépôt custom groupé.</p><button class="btn" data-tip="Compare à nouveau les fichiers locaux avec leurs sources distantes sans effectuer de mise à jour." onclick="refreshUpdates(true)">Revérifier</button><div id="moduleUpdates" class="module-list"><div class="muted">Vérification…</div></div></div>
+<div class="card"><h2>Installer depuis le catalogue</h2><p class="muted">Modules C++ conventionnels uniquement (<code>azerothcore-module</code>, nom <code>mod-*</code>). Le dépôt est cloné sans exécuter son code. Vérifiez sa documentation avant le rebuild.</p><div class="catalogue-controls"><input id="catalogueSearch" type="search" placeholder="Rechercher un module…" oninput="renderCatalogue()"><button class="btn" data-tip="Recharge la liste officielle du catalogue AzerothCore sans installer de module." onclick="loadCatalogue(true)">Actualiser</button></div><div id="catalogueModules" class="module-list catalogue-list"><div class="muted">Ouvrez cet onglet pour charger le catalogue.</div></div></div>
 </div></section>
 
 <section id="future"><div class="grid">
@@ -167,7 +169,7 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='configs') loadConfigList();
   if(b.dataset.tab==='override'){loadAcOptions();loadOverride()}
   if(b.dataset.tab==='logs') refreshLogs(100);
-  if(b.dataset.tab==='modules') refreshUpdates();
+  if(b.dataset.tab==='modules'){refreshUpdates();loadCatalogue()}
 });
 async function api(url,opt){const r=await fetch(url,opt);return await r.json()}
 function show(o){$('#output').textContent=o.output??JSON.stringify(o,null,2)}
@@ -191,6 +193,19 @@ async function requestDashboardUpdate(){
   if(now>updateArmedUntil){updateArmedUntil=now+8000;button.textContent='Confirmer la mise à jour';button.classList.add('warn');setTimeout(()=>{if(Date.now()>updateArmedUntil){button.textContent='Mettre à jour';button.classList.remove('warn')}},8100);return}
   updateArmedUntil=0;button.disabled=true;button.textContent='Mise à jour…';
   try{const o=await api('/api/dashboard/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');$('#dashboardUpdateState').innerHTML='<i class="dot ok"></i>Mise à jour installée';$('#dashboardUpdateState').title=o.output;button.textContent='Rechargement…';setTimeout(()=>location.reload(),1500)}catch(e){button.disabled=false;button.textContent='Réessayer';button.classList.remove('warn');$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Mise à jour échouée';$('#dashboardUpdateState').title=e.message}
+}
+let catalogue=[],catalogueLoaded=false;
+async function loadCatalogue(force=false){
+  if(catalogueLoaded&&!force)return;const box=$('#catalogueModules');box.innerHTML='<div class="muted">Chargement du catalogue…</div>';
+  try{const o=await api('/api/modules/catalogue'+(force?'?refresh=1':''));if(!o.ok)throw new Error(o.output||'Catalogue indisponible');catalogue=o.modules||[];catalogueLoaded=true;renderCatalogue()}catch(e){catalogueLoaded=false;box.innerHTML=`<div class="notice">${esc(e.message)}</div>`}
+}
+function renderCatalogue(){
+  const q=($('#catalogueSearch').value||'').toLowerCase().trim();const rows=catalogue.filter(m=>(m.name+' '+m.full_name+' '+m.description).toLowerCase().includes(q)).slice(0,100);const box=$('#catalogueModules');
+  box.innerHTML=rows.map(m=>`<div class="module-row"><div><strong>${esc(m.name)}</strong><div class="module-meta">${esc(m.full_name)} · ★ ${m.stars}</div><div class="module-description">${esc(m.description||'Sans description.')}</div></div><div class="actions"><a class="btn" href="${escAttr(m.source)}" target="_blank" rel="noopener" data-tip="Ouvre le dépôt GitHub pour lire sa documentation et ses prérequis.">Détails</a><button class="btn ${m.installed?'':'warn'}" ${m.installed?'disabled':''} data-tip="Clone ce module validé dans le dossier modules. Aucun SQL ni rebuild n'est lancé automatiquement." onclick='installModule(${JSON.stringify(m.full_name)},${JSON.stringify(m.name)},this)'>${m.installed?'Installé':'Installer'}</button></div></div>`).join('')||'<div class="muted">Aucun module correspondant.</div>';
+}
+async function installModule(fullName,name,button){
+  if(!confirm(`Installer ${name} depuis le catalogue AzerothCore ?\n\nLe dépôt sera cloné dans modules, mais aucun SQL ni rebuild ne sera lancé.`))return;button.disabled=true;button.textContent='Installation…';
+  try{const o=await api('/api/modules/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:fullName,confirmed:true})});if(!o.ok)throw new Error(o.output||"Échec de l'installation");show(o);const item=catalogue.find(m=>m.full_name===fullName);if(item)item.installed=true;renderCatalogue();updatesLoaded=false;await refreshUpdates(true)}catch(e){button.disabled=false;button.textContent='Réessayer';show({output:e.message})}
 }
 async function refreshLogs(n){const o=await api('/api/logs?tail='+n);$('#logsBox').textContent=o.output||''}setInterval(()=>{if($('#autoLogs')?.checked)refreshLogs(200)},5000);
 

@@ -28,6 +28,7 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - placeholders visibles pour les futures fonctions prévues
 - indicateur automatique de mise à jour du dashboard, avec mise à jour confirmée en deux clics et sauvegarde locale
 - état de chaque module par comparaison avec le dépôt custom groupé ou avec son propre dépôt Git
+- recherche et installation confirmée des modules C++ conventionnels du catalogue officiel AzerothCore
 
 ## Sécurité
 
@@ -37,6 +38,8 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - rebuild lancé via le `rebuild.bat` fourni
 - les actions interactives sont ouvertes dans une vraie console Windows
 - la vérification des versions ne modifie aucun module
+- l'installateur refuse les URL libres : il clone uniquement un dépôt encore présent dans la catégorie `azerothcore-module`, avec un nom `mod-*`, et exige un `CMakeLists.txt` racine
+- l'installation est atomique, n'exécute aucun code du module et ne lance automatiquement ni SQL ni rebuild
 - l'auto-update ne remplace que les fichiers déclarés par son manifeste contrôlé et les sauvegarde dans `dashboard-backups`
 
 ## Fichiers
