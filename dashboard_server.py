@@ -73,6 +73,37 @@ def run(cmd, timeout=45, shell=False):
         return {"ok": False, "code": -1, "output": str(e)}
 
 
+def _remove_temporary_tree(path):
+    """Remove a staging tree, including read-only Git files on Windows."""
+    path = Path(path)
+    if not path.exists():
+        return None
+
+    def make_writable_and_retry(function, target, _error):
+        os.chmod(target, 0o700)
+        function(target)
+
+    try:
+        shutil.rmtree(path, onerror=make_writable_and_retry)
+        return None
+    except OSError as e:
+        return f"Nettoyage du dossier temporaire impossible ({path.name}): {e}"
+
+
+def _validate_cpp_module_tree(module_path):
+    """Accept both current AzerothCore modules and the legacy CMake layout."""
+    module_path = Path(module_path)
+    if (module_path / "CMakeLists.txt").is_file():
+        return
+    source_root = module_path / "src"
+    if source_root.is_dir() and any(path.is_file() for path in source_root.rglob("*.cpp")):
+        return
+    raise RuntimeError(
+        "Le dépôt ne ressemble pas à un module C++ AzerothCore: aucun fichier .cpp "
+        "dans src et aucun CMakeLists.txt à la racine; opération annulée."
+    )
+
+
 def _valid_branch_name(branch):
     return (isinstance(branch, str) and 0 < len(branch) <= 200
             and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) is not None
@@ -384,6 +415,7 @@ def install_catalogue_module(full_name):
     if not _module_operation_lock.acquire(blocking=False):
         return {"ok": False, "code": -1, "output": "Une opération sur un module est déjà en cours."}
     stage_root = None
+    result = None
     try:
         matches = [item for item in catalogue_modules(force=True) if item["full_name"] == full_name]
         if len(matches) != 1:
@@ -397,27 +429,31 @@ def install_catalogue_module(full_name):
 
         stage_root = Path(tempfile.mkdtemp(prefix=".dashboard-install-", dir=modules_root))
         staged = stage_root / module["name"]
-        result = run([
+        clone = run([
             "git", "clone", "--depth", "1", "--single-branch", "--branch", module["branch"],
             module["source"] + ".git", str(staged),
         ], timeout=180)
-        if not result["ok"]:
-            raise RuntimeError("git clone a échoué; aucun module n'a été installé.\n\n" + result["output"])
-        if not (staged / "CMakeLists.txt").is_file():
-            raise RuntimeError("Le dépôt ne contient pas de CMakeLists.txt à sa racine; installation annulée.")
+        if not clone["ok"]:
+            details = clone["output"].strip() or f"Git a quitté avec le code {clone['code']} sans message."
+            raise RuntimeError("git clone a échoué; aucun module n'a été installé.\n\n" + details)
+        _validate_cpp_module_tree(staged)
         os.replace(staged, destination)
-        return {
+        result = {
             "ok": True,
             "code": 0,
             "output": f"{module['name']} installé depuis {module['source']}. Lancez maintenant un Rebuild AzerothCore.",
             "module": module,
         }
     except Exception as e:
-        return {"ok": False, "code": -1, "output": str(e)}
+        result = {"ok": False, "code": -1, "output": str(e)}
     finally:
+        cleanup_error = None
         if stage_root is not None:
-            shutil.rmtree(stage_root, ignore_errors=True)
+            cleanup_error = _remove_temporary_tree(stage_root)
         _module_operation_lock.release()
+        if cleanup_error:
+            result["output"] += "\n\n" + cleanup_error
+    return result
 
 
 def update_local_module(name):
@@ -458,8 +494,7 @@ def update_local_module(name):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
 
-        if not (staged / "CMakeLists.txt").is_file():
-            raise RuntimeError("La nouvelle version ne contient pas de CMakeLists.txt racine; mise à jour annulée.")
+        _validate_cpp_module_tree(staged)
 
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         backup = PROJECT_ROOT / "module-backups" / stamp / name
