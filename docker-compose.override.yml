@@ -1,0 +1,51 @@
+services: 
+  ac-database: 
+    command: 
+      - --innodb-default-row-format=DYNAMIC 
+      - --innodb-file-per-table=ON 
+      - --innodb-strict-mode=OFF 
+ 
+  ac-worldserver: 
+    environment: 
+      # Playerbots 
+      AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN: "1" 
+      AC_AI_PLAYERBOT_MIN_RANDOM_BOTS: "200" 
+      AC_AI_PLAYERBOT_MAX_RANDOM_BOTS: "500" 
+ 
+      # Mount Chest 
+      AC_MOUNT_CHEST_ENABLE: "1" 
+      AC_MOUNT_CHEST_OWNER_ONLY: "1" 
+      AC_MOUNT_CHEST_LIFETIME_SECONDS: "120" 
+      AC_MOUNT_CHEST_MONEY_MIN: "10" 
+      AC_MOUNT_CHEST_MONEY_MAX: "50" 
+ 
+      # Individual Progression 
+      AC_ENABLE_PLAYER_SETTINGS: "1" 
+      AC_DBC_ENFORCE_ITEM_ATTRIBUTES: "0" 
+      AC_INDIVIDUAL_PROGRESSION_BOT_ACCOUNTS_MAX_LEVEL: "60" 
+ 
+      # AOE Loot 
+      AC_AOELOOT_ENABLE: "1" 
+      AC_AOELOOT_MESSAGE: "1" 
+ 
+      # Drop rates 
+      AC_RATE_DROP_ITEM_UNCOMMON: "7" 
+      AC_RATE_DROP_ITEM_RARE: "7" 
+ 
+      # Métiers principaux
+      AC_MAX_PRIMARY_TRADE_SKILL: "11"
+
+      # Limite globale Vanilla 
+      AC_MAX_PLAYER_LEVEL: "60" 
+      AC_EXPANSION: "2" 
+ 
+      # Database updates 
+      AC_UPDATES_ENABLE_DATABASES: "7" 
+ 
+      AC_RATE_DROP_ITEM_NORMAL: "3" # Rate.Drop.Item.Normal
+      AC_RATE_REST_OFFLINE_IN_TAVERN_OR_CITY: "3" # Rate.Rest.Offline.InTavernOrCity
+      AC_RATE_REST_OFFLINE_IN_WILDERNESS: "5" # Rate.Rest.Offline.InWilderness
+      AC_RATE_REST_MAX_BONUS: "3.0" # Rate.Rest.MaxBonus
+      AC_SKILL_GAIN_CRAFTING: "3" # SkillGain.Crafting
+    volumes: 
+      - ./modules:/azerothcore/modules:ro

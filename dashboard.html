@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AzerothCore Local Dashboard</title>
+<style>
+:root{--bg:#0b1017;--panel:#121a24;--panel2:#172230;--line:#263548;--text:#e9f0f7;--muted:#93a4b7;--gold:#d7b35a;--blue:#66aaff;--green:#5fd39a;--red:#ff7b87;--orange:#f5b96b}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#080c11,#0d141d 40%,#0b1118);color:var(--text);font:14px/1.45 Inter,Segoe UI,Arial,sans-serif}
+header{max-width:1500px;margin:auto;padding:24px 22px 12px;display:flex;align-items:end;justify-content:space-between;gap:18px}h1{margin:0;color:#f0d584;font-size:30px}.sub,.muted{color:var(--muted)}.toplinks a{color:#b9d8ff;text-decoration:none;margin-left:14px}
+.wrap{max-width:1500px;margin:auto;padding:10px 22px 50px}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 18px}
+button,.btn{position:relative}.tab{border:1px solid var(--line);background:#101923;color:#cbd7e4;padding:9px 12px;border-radius:10px;cursor:pointer}.tab.active{background:#1b2a3a;color:white;border-color:#415a75}
+[data-tip]:hover:after{content:attr(data-tip);position:absolute;z-index:9999;left:50%;top:calc(100% + 8px);transform:translateX(-50%);width:max-content;max-width:330px;background:#03070b;color:#eaf2fa;border:1px solid #3a4a5c;padding:7px 9px;border-radius:8px;font-size:12px;font-weight:400;line-height:1.35;white-space:normal;box-shadow:0 8px 25px #0008;pointer-events:none}
+section{display:none}section.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}.two{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:0 8px 30px #0004}.card h2,.card h3{margin:0 0 8px}
+.statusrow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #223040}.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:7px;background:#667}.dot.ok{background:var(--green)}.dot.bad{background:var(--red)}
+.actions,.toolbar{display:flex;flex-wrap:wrap;gap:8px}.btn{display:inline-block;text-decoration:none;border:1px solid #33465b;background:#182536;color:#e8f0f8;padding:9px 12px;border-radius:9px;cursor:pointer}.btn:hover{background:#22344a}.btn.warn{border-color:#6e562e}.btn.danger{border-color:#6b3139}
+pre,.console{background:#070b10;border:1px solid #1e2a38;border-radius:11px;padding:12px;color:#cfe3f9;white-space:pre-wrap;overflow:auto;font-family:Consolas,monospace;max-height:430px}
+select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;border-radius:9px;padding:9px}textarea{width:100%;min-height:330px;font:13px/1.45 Consolas,monospace;resize:vertical}.configline{display:flex;gap:8px;align-items:center}.configline select{flex:1}
+.notice{border-left:3px solid var(--gold);padding:10px 12px;background:#151d27;border-radius:8px;color:#cdd8e4;margin:12px 0}.small{font-size:12px}
+.placeholder{opacity:.62;position:relative}.placeholder:after{content:"À venir";position:absolute;top:12px;right:12px;border:1px solid #526070;border-radius:999px;padding:2px 8px;color:#9aabba;font-size:11px}
+.visual-list{margin-top:14px;display:grid;gap:8px}.visual-row{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(220px,1fr);gap:10px;align-items:start;padding:10px;background:#0e1620;border:1px solid #213043;border-radius:10px}.visual-key{font-family:Consolas,monospace;color:#9fd0ff;word-break:break-word}.visual-comment{grid-column:1/-1;color:#8497aa;font-size:12px}.visual-row input{width:100%}
+.searchbox{width:100%;margin:8px 0}.option-list{display:grid;gap:8px;max-height:520px;overflow:auto}.option{border:1px solid #26374b;background:#0d151e;border-radius:10px;padding:10px}.option-head{display:flex;justify-content:space-between;gap:10px}.option code{color:#9fd0ff}.option .desc{color:#8fa1b3;font-size:12px;margin:5px 0}.option-controls{display:flex;gap:8px;align-items:center}.option-controls input{flex:1}
+@media(max-width:900px){.two{grid-template-columns:1fr}.visual-row{grid-template-columns:1fr}header{align-items:start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header>
+<div><h1>AzerothCore Local Dashboard</h1><div class="sub">C:\azerothcore-playerbots · Docker Desktop · Playerbots</div></div>
+<div class="toplinks">
+<a href="/docs/commands" target="_blank">📌 Commandes joueur</a>
+<a href="/docs/maintenance" target="_blank">📘 Guide maintenance</a>
+</div>
+</header>
+<div class="wrap">
+<div class="tabs">
+<button class="tab active" data-tab="dashboard" data-tip="Vue rapide de l'état Docker et des principales actions serveur.">Dashboard</button>
+<button class="tab" data-tab="configs" data-tip="Lire et modifier les fichiers .conf, en brut ou avec un formulaire visuel.">Configs</button>
+<button class="tab" data-tab="override" data-tip="Rechercher une option native AzerothCore et l'ajouter automatiquement au docker-compose.override.yml.">Compose override</button>
+<button class="tab" data-tab="logs" data-tip="Voir les dernières lignes du worldserver ou ouvrir les logs live.">Logs</button>
+<button class="tab" data-tab="modules" data-tip="Accéder aux modules, dossiers et scripts de patch.">Modules & dossiers</button>
+<button class="tab" data-tab="future" data-tip="Liste des fonctions prévues pour les prochaines versions.">Fonctions prévues</button>
+</div>
+
+<section id="dashboard" class="active">
+<div class="grid">
+<div class="card"><h2>État serveur</h2><div id="services">Chargement…</div><div class="actions" style="margin-top:12px">
+<button class="btn" data-tip="Relit immédiatement l'état de Docker et des trois conteneurs AzerothCore." onclick="refreshStatus()">Actualiser</button>
+<button class="btn" data-tip="Exécute docker compose up -d pour démarrer les services du projet." onclick="act('start')">Démarrer</button>
+<button class="btn danger" data-tip="Exécute docker compose stop. Les conteneurs et volumes sont conservés." onclick="act('stop')">Arrêter</button>
+<button class="btn" data-tip="Redémarre tous les services Docker Compose sans supprimer les volumes." onclick="act('restart_all')">Restart tout</button>
+</div></div>
+
+<div class="card"><h2>Worldserver</h2><div class="actions">
+<button class="btn" data-tip="Redémarre uniquement ac-worldserver avec docker compose restart." onclick="act('restart_world')">Restart world</button>
+<button class="btn" data-tip="Recrée uniquement ac-worldserver pour appliquer les nouvelles variables d'environnement." onclick="act('recreate_world')">Recreate world</button>
+<button class="btn" data-tip="Ouvre une nouvelle console Windows avec docker compose logs -f ac-worldserver." onclick="act('logs_live')">Logs live</button>
+<button class="btn" data-tip="Exécute docker compose config pour vérifier que les fichiers Compose sont valides." onclick="act('validate_compose')">Valider compose</button>
+</div><div class="notice small">Aucune action ne lance <code>docker compose down -v</code>.</div></div>
+
+<div class="card"><h2>Rebuild</h2><p class="muted">Le bouton principal appelle directement <code>rebuild-azerothcore.ps1</code>.</p><div class="actions">
+<button class="btn warn" data-tip="Ouvre une console Windows et exécute directement rebuild-azerothcore.ps1." onclick="act('rebuild')">🛠 Rebuild AzerothCore</button>
+<button class="btn warn" data-tip="Applique d'abord les deux patchs Playerbots, puis lance rebuild-azerothcore.ps1 dans la même console." onclick="act('patch_rebuild')">🧩 Patch + Rebuild</button>
+<button class="btn" data-tip="Lance uniquement apply-playerbots-gather-only.ps1 dans une nouvelle console." onclick="act('patch_gather')">Patch gather</button>
+<button class="btn" data-tip="Lance uniquement apply-playerbots-selfbot-lock.ps1 dans une nouvelle console." onclick="act('patch_selfbot')">Patch selfbot</button>
+</div></div>
+
+<div class="card"><h2>Documentation</h2><div class="actions">
+<a class="btn" data-tip="Ouvre la cheat sheet des commandes joueur dans un nouvel onglet." href="/docs/commands" target="_blank">Commandes joueur</a>
+<a class="btn" data-tip="Ouvre notre guide de maintenance Docker/AzerothCore." href="/docs/maintenance" target="_blank">Guide maintenance</a>
+</div></div>
+</div>
+<h3>Dernière sortie</h3><pre id="output">Prêt.</pre>
+</section>
+
+<section id="configs">
+<div class="card">
+<h2>Éditeur de configuration</h2>
+<p class="muted">Le cadre du haut garde toujours le fichier brut. En dessous, chaque option <code>Clé = Valeur</code> est aussi éditable visuellement. Modifier un champ visuel met immédiatement à jour le brut, et inversement après “Reparser”.</p>
+<div class="configline">
+<select id="configSelect"></select>
+<button class="btn" data-tip="Charge le fichier sélectionné depuis le disque ou depuis le conteneur worldserver." onclick="loadConfig()">Charger</button>
+<button class="btn" data-tip="Relit le texte brut et régénère les champs visuels ligne par ligne." onclick="parseVisual()">Reparser</button>
+<button class="btn" data-tip="Enregistre la version actuelle après création automatique d'une sauvegarde horodatée." onclick="saveConfig()">Sauver</button>
+<button class="btn" data-tip="Recharge la liste des fichiers .conf et .conf.dist disponibles." onclick="loadConfigList()">Rafraîchir</button>
+</div>
+<h3>Configuration brute</h3>
+<textarea id="configEditor" spellcheck="false" placeholder="Choisis une config…"></textarea>
+<h3>Édition visuelle</h3>
+<input id="visualSearch" class="searchbox" type="search" placeholder="Filtrer une clé ou un commentaire…" oninput="filterVisual()">
+<div id="visualConfig" class="visual-list"><div class="muted">Charge une configuration pour générer les champs.</div></div>
+<pre id="configMsg">—</pre>
+</div>
+</section>
+
+<section id="override">
+<div class="two">
+<div class="card">
+<h2>Ajouter une option AzerothCore</h2>
+<p class="muted">Le dashboard lit le <code>worldserver.conf.dist</code> local (ou celui du conteneur), recherche les paramètres natifs et calcule automatiquement leur variable Docker <code>AC_...</code>.</p>
+<input id="acSearch" class="searchbox" type="search" placeholder="Ex : MaxPrimaryTradeSkill, Rate.Drop, AllowTwoSide…" oninput="renderAcOptions()">
+<div id="acSource" class="small muted">Options non chargées.</div>
+<div id="acOptions" class="option-list"></div>
+</div>
+<div class="card">
+<h2>docker-compose.override.yml actuel</h2>
+<p class="muted">Après ajout, le dashboard fait automatiquement un backup puis lance <code>docker compose config</code>. Si la validation échoue, l'ancien fichier est restauré.</p>
+<button class="btn" data-tip="Recharge le contenu actuel de docker-compose.override.yml." onclick="loadOverride()">Rafraîchir le YAML</button>
+<pre id="overrideRaw">—</pre>
+</div>
+</div>
+</section>
+
+<section id="logs"><div class="card"><div class="toolbar">
+<button class="btn" data-tip="Affiche les 100 dernières lignes des logs du worldserver." onclick="refreshLogs(100)">100 lignes</button>
+<button class="btn" data-tip="Affiche les 300 dernières lignes des logs du worldserver." onclick="refreshLogs(300)">300 lignes</button>
+<button class="btn" data-tip="Ouvre le suivi temps réel des logs dans une console Windows séparée." onclick="act('logs_live')">Ouvrir logs live</button>
+<label data-tip="Rafraîchit automatiquement les 200 dernières lignes toutes les 5 secondes."><input type="checkbox" id="autoLogs"> auto 5s</label>
+</div><pre id="logsBox">Clique sur un bouton.</pre></div></section>
+
+<section id="modules"><div class="grid">
+<div class="card"><h2>Dossiers</h2><div class="actions">
+<button class="btn" data-tip="Ouvre C:\azerothcore-playerbots dans l'Explorateur Windows." onclick="act('open_root')">Repo</button>
+<button class="btn" data-tip="Ouvre C:\azerothcore-playerbots\modules dans l'Explorateur Windows." onclick="act('open_modules')">Modules</button>
+<button class="btn" data-tip="Ouvre le dossier des sauvegardes de configs créées par le dashboard." onclick="act('open_config_backups')">Backups configs</button>
+<button class="btn" data-tip="Ouvre ou crée le dossier db-backups dans le projet." onclick="act('open_db_backups')">Backups DB</button>
+</div></div>
+<div class="card"><h2>Patchs Playerbots</h2><div class="actions">
+<button class="btn" data-tip="Lance le patch directed gather / grindtarget sur les sources Playerbots." onclick="act('patch_gather')">apply-playerbots-gather-only.ps1</button>
+<button class="btn" data-tip="Lance le patch de restriction selfbot sur les sources Playerbots." onclick="act('patch_selfbot')">apply-playerbots-selfbot-lock.ps1</button>
+</div></div>
+<div class="card placeholder"><h2>Gestion modules</h2><p>Liste des modules, version, branche Git, config présente, SQL détecté, état du patch.</p></div>
+<div class="card placeholder"><h2>Update modules</h2><p>Vérification Git, sauvegarde, pull contrôlé et rebuild optionnel.</p></div>
+</div></section>
+
+<section id="future"><div class="grid">
+<div class="card placeholder"><h3>Recherche globale configs</h3><p>Rechercher une clé dans toutes les configs.</p></div>
+<div class="card placeholder"><h3>Diff conf / conf.dist</h3><p>Valeurs modifiées et nouvelles options après update.</p></div>
+<div class="card placeholder"><h3>Validation configs</h3><p>Doublons, clés inconnues et valeurs invalides.</p></div>
+<div class="card placeholder"><h3>Profils</h3><p>Classic 60, WotLK, Test bots, Low CPU.</p></div>
+<div class="card placeholder"><h3>Backup DB</h3><p>Dumps datés auth/characters/world/playerbots.</p></div>
+<div class="card placeholder"><h3>Restore DB assisté</h3><p>Restauration avec confirmations fortes.</p></div>
+<div class="card placeholder"><h3>Git / updates</h3><p>Branche, commit, fichiers modifiés, update prudente.</p></div>
+<div class="card placeholder"><h3>SQL updater</h3><p>SQL modules, SHA1, applied / missing / mismatch.</p></div>
+<div class="card placeholder"><h3>Monitoring</h3><p>CPU/RAM, volumes et historique.</p></div>
+<div class="card placeholder"><h3>Playerbots</h3><p>Min/max bots, autologin et état connecté.</p></div>
+<div class="card placeholder"><h3>AuctionSim</h3><p>État, bot, scans et erreurs.</p></div>
+<div class="card placeholder"><h3>Automation custom</h3><p>UI dédiée SearchRadius, mount, route avoidance, damage hold.</p></div>
+<div class="card placeholder"><h3>Commandes worldserver</h3><p>Raccourcis GM et console intégrée.</p></div>
+<div class="card placeholder"><h3>WoW client</h3><p>Lancer Wow.exe, vider Cache, realmlist.</p></div>
+<div class="card placeholder"><h3>Diagnostic</h3><p>Rapport Docker, compose, Git, configs et erreurs.</p></div>
+<div class="card placeholder"><h3>Historique rebuild</h3><p>Date, durée, succès/échec et commit.</p></div>
+<div class="card placeholder"><h3>Raccourcis personnalisés</h3><p>Ajouter .bat, .ps1, dossiers et outils.</p></div>
+<div class="card placeholder"><h3>Mode safe</h3><p>Exiger un backup récent avant opérations sensibles.</p></div>
+</div></section>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('section').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); $('#'+b.dataset.tab).classList.add('active');
+  if(b.dataset.tab==='configs') loadConfigList();
+  if(b.dataset.tab==='override'){loadAcOptions();loadOverride()}
+  if(b.dataset.tab==='logs') refreshLogs(100);
+});
+async function api(url,opt){const r=await fetch(url,opt);return await r.json()}
+function show(o){$('#output').textContent=o.output??JSON.stringify(o,null,2)}
+async function act(name){$('#output').textContent='Exécution…';const o=await api('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});show(o);setTimeout(refreshStatus,700)}
+async function refreshStatus(){const s=await api('/api/status');const names=['ac-database','ac-authserver','ac-worldserver'];$('#services').innerHTML=`<div class="statusrow"><span>Docker Engine</span><span><i class="dot ${s.docker?'ok':'bad'}"></i>${s.docker?'OK':'OFF'}</span></div>`+names.map(n=>{const x=s.services[n];return `<div class="statusrow"><span>${n}</span><span><i class="dot ${x.running?'ok':'bad'}"></i>${x.running?'RUNNING':(x.exists?'STOPPED':'ABSENT')}</span></div>`}).join('')}
+async function refreshLogs(n){const o=await api('/api/logs?tail='+n);$('#logsBox').textContent=o.output||''}setInterval(()=>{if($('#autoLogs')?.checked)refreshLogs(200)},5000);
+
+let configs=[], currentVisual=[];
+async function loadConfigList(){const o=await api('/api/configs');configs=[...(o.active||[]),...(o.host||[])];const sel=$('#configSelect');sel.innerHTML='';configs.forEach((c,i)=>{const op=document.createElement('option');op.value=i;op.textContent=c.label;sel.appendChild(op)});$('#configMsg').textContent=configs.length?`${configs.length} configuration(s) trouvée(s).`:'Aucune config trouvée.'}
+async function loadConfig(){const c=configs[Number($('#configSelect').value)];if(!c)return;const o=await api('/api/config?source='+encodeURIComponent(c.source)+'&path='+encodeURIComponent(c.path));if(o.ok){$('#configEditor').value=o.content;$('#configMsg').textContent='Chargé: '+c.label;parseVisual()}else $('#configMsg').textContent=o.output}
+function parseConfLines(text){
+  const rows=[];const lines=text.split(/\r?\n/);let comments=[];
+  lines.forEach((raw,idx)=>{
+    const t=raw.trim();
+    if(t.startsWith('#')||t.startsWith(';')){comments.push(t.substring(1).trim());return}
+    const m=raw.match(/^(\s*)([A-Za-z0-9_.-]+)(\s*=\s*)(.*?)(\s*)$/);
+    if(m){rows.push({idx,key:m[2],value:m[4],comment:comments.slice(-6).filter(Boolean).join(' ')});comments=[]}
+    else if(t) comments=[];
+  });return rows
+}
+function parseVisual(){currentVisual=parseConfLines($('#configEditor').value);renderVisual()}
+function renderVisual(){
+  const box=$('#visualConfig');const q=($('#visualSearch').value||'').toLowerCase();box.innerHTML='';
+  const rows=currentVisual.filter(r=>(r.key+' '+r.value+' '+r.comment).toLowerCase().includes(q));
+  if(!rows.length){box.innerHTML='<div class="muted">Aucune option correspondante.</div>';return}
+  rows.forEach(r=>{const d=document.createElement('div');d.className='visual-row';d.innerHTML=`<div class="visual-key">${esc(r.key)}</div><input data-line="${r.idx}" value="${escAttr(r.value)}"><div class="visual-comment">${esc(r.comment||'—')}</div>`;d.querySelector('input').onchange=e=>updateRawLine(r.idx,e.target.value);box.appendChild(d)})
+}
+function updateRawLine(idx,value){const lines=$('#configEditor').value.split(/\r?\n/);const raw=lines[idx];const m=raw.match(/^(\s*)([A-Za-z0-9_.-]+)(\s*=\s*)(.*?)(\s*)$/);if(!m)return;lines[idx]=m[1]+m[2]+m[3]+value+m[5];$('#configEditor').value=lines.join('\n');currentVisual=parseConfLines($('#configEditor').value);renderVisual()}
+function filterVisual(){renderVisual()}
+async function saveConfig(){const c=configs[Number($('#configSelect').value)];if(!c)return;if(!confirm('Sauvegarder '+c.label+' ? Une copie de sécurité sera créée.'))return;const o=await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:c.source,path:c.path,content:$('#configEditor').value})});$('#configMsg').textContent=o.output||JSON.stringify(o)}
+
+let acOptions=[];
+async function loadAcOptions(){if(acOptions.length){renderAcOptions();return}const o=await api('/api/ac_options');if(!o.ok){$('#acSource').textContent=o.output;return}acOptions=o.options||[];$('#acSource').textContent=`${o.count} options chargées depuis ${o.source}`;renderAcOptions()}
+function renderAcOptions(){
+  const q=($('#acSearch').value||'').toLowerCase().trim();const box=$('#acOptions');box.innerHTML='';
+  let rows=acOptions.filter(o=>(o.key+' '+o.env+' '+o.description).toLowerCase().includes(q)).slice(0,80);
+  if(!q) rows=rows.slice(0,30);
+  rows.forEach((o,i)=>{const d=document.createElement('div');d.className='option';d.innerHTML=`<div class="option-head"><code>${esc(o.key)}</code><span>${esc(o.env)}</span></div><div class="desc">${esc(o.description||'Pas de description récupérée.')}</div><div class="option-controls"><input id="acv-${i}" value="${escAttr(o.default)}"><button class="btn" data-tip="Ajoute ou met à jour ${escAttr(o.env)} dans ac-worldserver.environment, puis valide le YAML." onclick='addAcOption(${JSON.stringify(o.key)},${JSON.stringify(o.env)},"acv-${i}")'>Ajouter</button></div>`;box.appendChild(d)})
+  if(!rows.length)box.innerHTML='<div class="muted">Aucune option trouvée.</div>'
+}
+async function addAcOption(key,env,inputId){const value=document.getElementById(inputId).value;if(!confirm(`Ajouter ${env} = ${value} ?`))return;const o=await api('/api/override/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,env,value})});show(o);await loadOverride()}
+async function loadOverride(){const o=await api('/api/override');$('#overrideRaw').textContent=o.ok?(o.content||'(fichier vide)'):o.output}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function escAttr(s){return esc(s)}
+refreshStatus();
+</script>
+</body>
+</html>

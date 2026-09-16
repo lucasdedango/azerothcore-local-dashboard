@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maintenance AzerothCore Playerbots</title>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#11182c; --panel2:#171f36; --text:#eef2ff; --muted:#9ba7c4;
+      --accent:#7dd3fc; --accent2:#a78bfa; --ok:#86efac; --warn:#fde68a; --bad:#fda4af;
+      --border:#26314e; --code:#070b14;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:Inter,Segoe UI,Roboto,Arial,sans-serif; color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(125,211,252,.10), transparent 28%),
+        radial-gradient(circle at top right, rgba(167,139,250,.10), transparent 28%),
+        var(--bg);
+      min-height:100vh;
+    }
+    header{
+      padding:28px 28px 18px; max-width:1280px; margin:auto;
+    }
+    h1{margin:0 0 8px; font-size:clamp(28px,4vw,44px)}
+    .subtitle{color:var(--muted); max-width:900px; line-height:1.6}
+    .badge{
+      display:inline-block; margin-top:12px; padding:6px 10px; border:1px solid var(--border);
+      border-radius:999px; color:var(--accent); background:rgba(125,211,252,.06); font-size:13px;
+    }
+    .app{
+      max-width:1280px; margin:auto; padding:0 28px 36px;
+      display:grid; grid-template-columns:260px 1fr; gap:20px;
+    }
+    nav{
+      background:rgba(17,24,44,.92); border:1px solid var(--border); border-radius:18px;
+      padding:12px; height:max-content; position:sticky; top:16px; box-shadow:0 18px 60px rgba(0,0,0,.22);
+    }
+    nav button{
+      width:100%; text-align:left; border:0; color:var(--text); background:transparent;
+      padding:12px 13px; border-radius:11px; cursor:pointer; margin:3px 0; font-size:14px;
+    }
+    nav button:hover{background:var(--panel2)}
+    nav button.active{background:linear-gradient(90deg,rgba(125,211,252,.14),rgba(167,139,250,.10)); color:#fff; outline:1px solid var(--border)}
+    nav .level{color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.12em; padding:12px 11px 5px}
+    main{
+      background:rgba(17,24,44,.88); border:1px solid var(--border); border-radius:18px;
+      padding:24px; min-height:640px; box-shadow:0 18px 60px rgba(0,0,0,.22);
+    }
+    section{display:none}
+    section.active{display:block}
+    h2{margin:0 0 8px; font-size:28px}
+    h3{margin-top:26px; font-size:18px}
+    p,li{line-height:1.65; color:#dbe4ff}
+    .muted{color:var(--muted)}
+    .card{
+      background:var(--panel2); border:1px solid var(--border); border-radius:14px;
+      padding:16px 18px; margin:14px 0;
+    }
+    .grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px}
+    .note,.warn,.danger,.ok{
+      padding:12px 14px; border-radius:12px; margin:14px 0; border:1px solid var(--border);
+    }
+    .note{background:rgba(125,211,252,.08)}
+    .warn{background:rgba(253,230,138,.08); color:#fff7cf}
+    .danger{background:rgba(253,164,175,.08); color:#ffe1e6}
+    .ok{background:rgba(134,239,172,.08); color:#dcffe8}
+    pre{
+      position:relative; background:var(--code); border:1px solid #1d2944; border-radius:12px;
+      padding:15px 48px 15px 15px; overflow:auto; color:#d6e7ff; line-height:1.5;
+    }
+    code{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace}
+    .copy{
+      position:absolute; right:8px; top:8px; border:1px solid var(--border); background:#121a2c;
+      color:#dbeafe; padding:6px 9px; border-radius:8px; cursor:pointer; font-size:12px;
+    }
+    table{width:100%; border-collapse:collapse; margin:12px 0}
+    th,td{padding:10px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top}
+    th{color:var(--accent)}
+    .kbd{font-family:monospace; padding:2px 7px; border:1px solid var(--border); border-bottom-width:2px; border-radius:6px; background:#0e1526}
+    footer{color:var(--muted); font-size:12px; margin-top:28px}
+    @media(max-width:860px){
+      .app{grid-template-columns:1fr}
+      nav{position:static}
+      .grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Maintenance AzerothCore · Playerbots</h1>
+  <div class="subtitle">
+    Mémo local pour le serveur <strong>C:\azerothcore-playerbots</strong> :
+    démarrage, arrêt, logs, console, recompilation, modules, SQL et dépannage courant.
+  </div>
+  <span class="badge">Solo / petit groupe · Docker Desktop · AzerothCore WotLK</span>
+</header>
+
+<div class="app">
+<nav>
+  <div class="level">Niveau 1 · Basique</div>
+  <button class="tab active" data-target="start">▶ Démarrer / arrêter</button>
+  <button class="tab" data-target="status">● Vérifier l'état</button>
+  <button class="tab" data-target="logs">📜 Logs</button>
+  <button class="tab" data-target="console">⌨ Console serveur</button>
+
+  <div class="level">Niveau 2 · Courant</div>
+  <button class="tab" data-target="restart">↻ Redémarrage ciblé</button>
+  <button class="tab" data-target="config">⚙ Config / override</button>
+  <button class="tab" data-target="sql">🗄 SQL / patches</button>
+  <button class="tab" data-target="backup">💾 Sauvegarde DB</button>
+
+  <div class="level">Niveau 3 · Maintenance</div>
+  <button class="tab" data-target="rebuild">🛠 Recompiler</button>
+  <button class="tab" data-target="modules">🧩 Mettre à jour un module</button>
+  <button class="tab" data-target="updatecore">⬆ Mettre à jour le core</button>
+
+  <div class="level">Niveau 4 · Dépannage</div>
+  <button class="tab" data-target="problems">🚨 Problèmes fréquents</button>
+  <button class="tab" data-target="cheatsheet">📌 Commandes utiles</button>
+</nav>
+
+<main>
+<section id="start" class="active">
+  <h2>Démarrer / arrêter le serveur</h2>
+  <p class="muted">Toujours commencer dans le dossier du projet.</p>
+  <pre><button class="copy">Copier</button><code>cd C:\azerothcore-playerbots</code></pre>
+
+  <h3>Démarrer tout le serveur</h3>
+  <pre><button class="copy">Copier</button><code>docker compose up -d</code></pre>
+  <div class="ok">Le <strong>-d</strong> lance les conteneurs en arrière-plan.</div>
+
+  <h3>Arrêter proprement les services</h3>
+  <pre><button class="copy">Copier</button><code>docker compose stop</code></pre>
+
+  <h3>Relancer après un arrêt</h3>
+  <pre><button class="copy">Copier</button><code>docker compose start</code></pre>
+
+  <div class="danger">
+    <strong>À éviter :</strong> <code>docker compose down -v</code>. Le <code>-v</code> supprime les volumes,
+    donc potentiellement les bases, comptes et personnages.
+  </div>
+</section>
+
+<section id="status">
+  <h2>Vérifier l'état</h2>
+  <pre><button class="copy">Copier</button><code>docker compose ps</code></pre>
+  <p>État attendu :</p>
+  <table>
+    <tr><th>Service</th><th>État souhaité</th></tr>
+    <tr><td>ac-database</td><td>Up / healthy</td></tr>
+    <tr><td>ac-authserver</td><td>Up</td></tr>
+    <tr><td>ac-worldserver</td><td>Up</td></tr>
+  </table>
+
+  <h3>Ressources utilisées</h3>
+  <pre><button class="copy">Copier</button><code>docker stats --no-stream</code></pre>
+
+  <h3>Voir les conteneurs Docker actifs</h3>
+  <pre><button class="copy">Copier</button><code>docker ps</code></pre>
+</section>
+
+<section id="logs">
+  <h2>Logs</h2>
+
+  <h3>Suivre le worldserver en direct</h3>
+  <pre><button class="copy">Copier</button><code>docker compose logs -f ac-worldserver</code></pre>
+  <p>Quitter l'affichage des logs avec <span class="kbd">Ctrl+C</span>. Cela ne coupe pas le serveur.</p>
+
+  <h3>Dernières lignes seulement</h3>
+  <pre><button class="copy">Copier</button><code>docker compose logs --tail=100 ac-worldserver</code></pre>
+
+  <h3>Chercher un module ou une erreur</h3>
+  <pre><button class="copy">Copier</button><code>docker compose logs --tail=300 ac-worldserver | Select-String -Pattern "MountChest|ERROR|Missing property"</code></pre>
+</section>
+
+<section id="console">
+  <h2>Console du worldserver</h2>
+
+  <div class="note">
+    Dans notre configuration, <code>docker attach ac-worldserver</code> a parfois renvoyé immédiatement
+    <code>read escape sequence</code>. La variante avec une touche de détachement explicite est préférable.
+  </div>
+
+  <pre><button class="copy">Copier</button><code>docker attach --detach-keys="ctrl-x" ac-worldserver</code></pre>
+
+  <p>Une fois attaché, utiliser les commandes AzerothCore, par exemple :</p>
+  <pre><button class="copy">Copier</button><code>account create test test
+account set gmlevel test 3 -1</code></pre>
+
+  <p>Pour quitter la console sans éteindre le serveur : <span class="kbd">Ctrl+X</span>.</p>
+
+  <div class="danger">
+    Ne jamais lancer manuellement un second <code>worldserver</code> depuis un shell du conteneur.
+  </div>
+</section>
+
+<section id="restart">
+  <h2>Redémarrage ciblé</h2>
+
+  <h3>Redémarrer uniquement le worldserver</h3>
+  <pre><button class="copy">Copier</button><code>docker compose restart ac-worldserver</code></pre>
+
+  <h3>Après modification des variables d'environnement</h3>
+  <p>Un simple <code>restart</code> ne recrée pas le conteneur. Utiliser :</p>
+  <pre><button class="copy">Copier</button><code>docker compose up -d --force-recreate ac-worldserver</code></pre>
+
+  <h3>Redémarrer world + auth</h3>
+  <pre><button class="copy">Copier</button><code>docker compose up -d --force-recreate ac-worldserver ac-authserver</code></pre>
+</section>
+
+<section id="config">
+  <h2>Configuration Docker / modules</h2>
+  <p>Notre fichier principal de personnalisation est généralement :</p>
+  <pre><code>C:\azerothcore-playerbots\docker-compose.override.yml</code></pre>
+
+  <h3>Valider le YAML avant de lancer</h3>
+  <pre><button class="copy">Copier</button><code>docker compose config</code></pre>
+
+  <h3>Exemple actuel du bloc worldserver</h3>
+  <pre><button class="copy">Copier</button><code>services:
+  ac-worldserver:
+    environment:
+      AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN: "1"
+      AC_AI_PLAYERBOT_MIN_RANDOM_BOTS: "200"
+      AC_AI_PLAYERBOT_MAX_RANDOM_BOTS: "500"
+
+      AC_MOUNT_CHEST_ENABLE: "1"
+      AC_MOUNT_CHEST_OWNER_ONLY: "1"
+      AC_MOUNT_CHEST_LIFETIME_SECONDS: "120"
+      AC_MOUNT_CHEST_MONEY_MIN: "10"
+      AC_MOUNT_CHEST_MONEY_MAX: "50"
+
+    volumes:
+      - ./modules:/azerothcore/modules:ro</code></pre>
+
+  <div class="warn">
+    Si les logs disent <code>Missing property X</code>, vérifier le fichier de config du module ou ajouter
+    la variable d'environnement correspondante, puis recréer le worldserver.
+  </div>
+</section>
+
+<section id="sql">
+  <h2>SQL / patches de modules</h2>
+
+  <h3>Appliquer le SQL de notre module de coffre</h3>
+  <pre><button class="copy">Copier</button><code>Get-Content .\modules\mod-mount-chest\sql\install.sql | docker exec -i ac-database mysql -uroot -ppassword acore_world</code></pre>
+
+  <h3>Tester une requête</h3>
+  <pre><button class="copy">Copier</button><code>docker exec ac-database mysql -uroot -ppassword acore_world -e "SELECT entry,name FROM gameobject_template WHERE entry IN (900001,900002,900003);"</code></pre>
+
+  <div class="note">
+    L'avertissement <code>Using a password on the command line interface can be insecure</code> est attendu
+    avec cette méthode locale.
+  </div>
+
+  <div class="danger">
+    Ne jamais supprimer/recréer le volume MySQL pour corriger un simple problème de module.
+  </div>
+</section>
+
+<section id="backup">
+  <h2>Sauvegarder la base</h2>
+
+  <p>Avant une grosse mise à jour, faire au minimum un dump des trois bases principales.</p>
+
+  <pre><button class="copy">Copier</button><code>mkdir C:\azerothcore-backups -ErrorAction SilentlyContinue
+
+docker exec ac-database mysqldump -uroot -ppassword acore_auth &gt; C:\azerothcore-backups\acore_auth.sql
+docker exec ac-database mysqldump -uroot -ppassword acore_characters &gt; C:\azerothcore-backups\acore_characters.sql
+docker exec ac-database mysqldump -uroot -ppassword acore_world &gt; C:\azerothcore-backups\acore_world.sql</code></pre>
+
+  <div class="warn">
+    Pour une sauvegarde importante, dater les fichiers et vérifier qu'ils ne font pas 0 octet.
+  </div>
+</section>
+
+<section id="rebuild">
+  <h2>Recompiler le worldserver</h2>
+  <p>À faire après modification du C++ d'un module, ajout/suppression de module ou changement nécessitant une nouvelle image.</p>
+
+  <h3>1. Libérer les ressources</h3>
+  <pre><button class="copy">Copier</button><code>docker stop ac-worldserver ac-authserver</code></pre>
+
+  <h3>2. Compiler</h3>
+  <pre><button class="copy">Copier</button><code>docker compose build ac-worldserver</code></pre>
+
+  <h3>3. Redémarrer avec la nouvelle image</h3>
+  <pre><button class="copy">Copier</button><code>docker compose up -d --force-recreate ac-worldserver ac-authserver</code></pre>
+
+  <h3>4. Contrôler</h3>
+  <pre><button class="copy">Copier</button><code>docker compose ps
+docker compose logs --tail=150 ac-worldserver</code></pre>
+
+  <div class="note">
+    Les Playerbots peuvent faire consommer beaucoup de CPU/RAM au worldserver. Pour une grosse recompilation,
+    il est préférable de couper world/auth mais de laisser MySQL tranquille.
+  </div>
+</section>
+
+<section id="modules">
+  <h2>Mettre à jour / remplacer un module</h2>
+
+  <ol>
+    <li>Arrêter <code>ac-worldserver</code> et <code>ac-authserver</code>.</li>
+    <li>Faire une copie du module <strong>en dehors du dossier modules</strong>.</li>
+    <li>Remplacer les fichiers dans <code>modules\nom-du-module</code>.</li>
+    <li>Appliquer son SQL si nécessaire.</li>
+    <li>Recompiler le worldserver.</li>
+    <li>Recréer world/auth.</li>
+    <li>Contrôler les logs.</li>
+  </ol>
+
+  <h3>Sauvegarde correcte d'un module</h3>
+  <pre><button class="copy">Copier</button><code>Copy-Item .\modules\mod-mount-chest C:\mod-mount-chest-backup -Recurse</code></pre>
+
+  <div class="danger">
+    Ne mets pas un dossier comme <code>mod-mount-chest-v1-backup</code> dans <code>.\modules</code>.
+    AzerothCore le considère comme un vrai module et peut générer une erreur de linker
+    <code>undefined reference to Add...Scripts()</code>.
+  </div>
+</section>
+
+<section id="updatecore">
+  <h2>Mettre à jour le core</h2>
+
+  <div class="warn">
+    Pour notre fork Playerbots, éviter de faire un <code>git pull</code> à l'aveugle juste avant de jouer.
+    Faire une sauvegarde DB et vérifier les modules locaux avant.
+  </div>
+
+  <h3>Procédure prudente</h3>
+  <pre><button class="copy">Copier</button><code>cd C:\azerothcore-playerbots
+docker stop ac-worldserver ac-authserver
+git status
+git pull
+git submodule update --init --recursive
+docker compose build ac-worldserver
+docker compose up -d --force-recreate ac-worldserver ac-authserver</code></pre>
+
+  <p>Ensuite contrôler immédiatement :</p>
+  <pre><button class="copy">Copier</button><code>docker compose ps
+docker compose logs --tail=200 ac-worldserver</code></pre>
+
+  <div class="note">
+    Si le fork Playerbots ou un module impose une branche/version spécifique, conserver cette branche.
+    Ne pas mélanger arbitrairement un core master différent avec des modules non compatibles.
+  </div>
+</section>
+
+<section id="problems">
+  <h2>Problèmes fréquents</h2>
+
+  <div class="card">
+    <h3>Build : <code>rpc error ... EOF</code></h3>
+    <p>Souvent Docker Desktop / BuildKit perd la connexion, sans erreur C++.</p>
+    <pre><button class="copy">Copier</button><code>docker compose build ac-worldserver</code></pre>
+    <p>Si cela recommence : redémarrer Docker Desktop, puis relancer le build.</p>
+  </div>
+
+  <div class="card">
+    <h3>Build bloqué vers 1840/1844</h3>
+    <p>Le linker final peut être lourd. Vérifier que l'ancien worldserver ne monopolise pas les ressources.</p>
+    <pre><button class="copy">Copier</button><code>docker stats --no-stream
+docker stop ac-worldserver ac-authserver</code></pre>
+  </div>
+
+  <div class="card">
+    <h3><code>undefined reference to Addmod_..._backupScripts()</code></h3>
+    <p>Un dossier de sauvegarde a probablement été laissé dans <code>.\modules</code>.</p>
+    <pre><button class="copy">Copier</button><code>Move-Item .\modules\mod-mount-chest-v1-backup C:\mod-mount-chest-v1-backup</code></pre>
+  </div>
+
+  <div class="card">
+    <h3><code>Missing property MountChest...</code></h3>
+    <p>La config du module n'est pas chargée. Vérifier les variables dans <code>docker-compose.override.yml</code>, puis :</p>
+    <pre><button class="copy">Copier</button><code>docker compose config
+docker compose up -d --force-recreate ac-worldserver</code></pre>
+  </div>
+
+  <div class="card">
+    <h3><code>read escape sequence</code> avec docker attach</h3>
+    <pre><button class="copy">Copier</button><code>docker attach --detach-keys="ctrl-x" ac-worldserver</code></pre>
+    <p>Puis quitter avec <span class="kbd">Ctrl+X</span>.</p>
+  </div>
+
+  <div class="card">
+    <h3>MySQL : port 3306 déjà utilisé</h3>
+    <p>Notre installation utilise le port hôte <strong>3307</strong> pour éviter le MySQL/MariaDB Windows déjà présent.</p>
+  </div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Commandes utiles · pense-bête</h2>
+  <div class="grid">
+    <div class="card"><strong>Démarrer</strong><pre><code>docker compose up -d</code></pre></div>
+    <div class="card"><strong>État</strong><pre><code>docker compose ps</code></pre></div>
+    <div class="card"><strong>Logs</strong><pre><code>docker compose logs -f ac-worldserver</code></pre></div>
+    <div class="card"><strong>Redémarrer world</strong><pre><code>docker compose restart ac-worldserver</code></pre></div>
+    <div class="card"><strong>Recréer world</strong><pre><code>docker compose up -d --force-recreate ac-worldserver</code></pre></div>
+    <div class="card"><strong>Compiler</strong><pre><code>docker compose build ac-worldserver</code></pre></div>
+    <div class="card"><strong>Ressources</strong><pre><code>docker stats --no-stream</code></pre></div>
+    <div class="card"><strong>Valider YAML</strong><pre><code>docker compose config</code></pre></div>
+    <div class="card"><strong>Console</strong><pre><code>docker attach --detach-keys="ctrl-x" ac-worldserver</code></pre></div>
+    <div class="card"><strong>Dossier projet</strong><pre><code>cd C:\azerothcore-playerbots</code></pre></div>
+  </div>
+
+  <footer>
+    Ce mémo est adapté à notre installation actuelle : Docker Desktop, AzerothCore Playerbots,
+    DB Docker exposée en 3307, modules AHBot / Individual XP / Playerbots / Mount Chest.
+  </footer>
+</section>
+</main>
+</div>
+
+<script>
+  const buttons = [...document.querySelectorAll('.tab')];
+  const sections = [...document.querySelectorAll('main section')];
+
+  buttons.forEach(btn => btn.addEventListener('click', () => {
+    buttons.forEach(b => b.classList.remove('active'));
+    sections.forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+    window.scrollTo({top:0, behavior:'smooth'});
+  }));
+
+  document.querySelectorAll('.copy').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const txt = btn.parentElement.querySelector('code').innerText;
+      try {
+        await navigator.clipboard.writeText(txt);
+        const old = btn.textContent;
+        btn.textContent = 'Copié ✓';
+        setTimeout(() => btn.textContent = old, 1200);
+      } catch(e) {
+        btn.textContent = 'Sélectionner';
+      }
+    });
+  });
+</script>
+</body>
+</html>

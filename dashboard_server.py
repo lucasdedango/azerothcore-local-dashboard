@@ -1,0 +1,531 @@
+#!/usr/bin/env python3
+# AzerothCore local dashboard - standard library only.
+# Binds ONLY to 127.0.0.1 and only allows operations inside PROJECT_ROOT.
+
+from __future__ import annotations
+import datetime as dt
+import json
+import mimetypes
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import threading
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+PROJECT_ROOT = Path(r"C:\azerothcore-playerbots").resolve()
+HOST = "127.0.0.1"
+PORT = 8765
+ACTIVE_CONF_DIR = "/azerothcore/env/dist/etc/modules"
+ALLOWED_EDIT_SUFFIXES = {".conf", ".dist", ".yml", ".yaml", ".env", ".txt", ".json"}
+
+def run(cmd, timeout=45, shell=False):
+    try:
+        p = subprocess.run(
+            cmd, cwd=PROJECT_ROOT, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=timeout, shell=shell, encoding="utf-8", errors="replace"
+        )
+        return {"ok": p.returncode == 0, "code": p.returncode, "output": p.stdout}
+    except subprocess.TimeoutExpired as e:
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        return {"ok": False, "code": -1, "output": f"Timeout\n{out}"}
+    except Exception as e:
+        return {"ok": False, "code": -1, "output": str(e)}
+
+def docker_available():
+    return run(["docker", "info"], timeout=8)["ok"]
+
+def container_exists(name):
+    r = run(["docker", "ps", "-a", "--format", "{{.Names}}"], timeout=8)
+    return r["ok"] and name in r["output"].splitlines()
+
+def container_running(name):
+    r = run(["docker", "ps", "--format", "{{.Names}}"], timeout=8)
+    return r["ok"] and name in r["output"].splitlines()
+
+def safe_host_path(rel):
+    # User-facing paths are always relative to the project root.
+    p = (PROJECT_ROOT / rel).resolve()
+    if p != PROJECT_ROOT and PROJECT_ROOT not in p.parents:
+        raise ValueError("Path outside project root")
+    return p
+
+def backup_text(label, content):
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    d = PROJECT_ROOT / "config-backups" / f"dashboard-{stamp}"
+    d.mkdir(parents=True, exist_ok=True)
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in label)
+    (d / safe).write_text(content, encoding="utf-8")
+    return str(d)
+
+def list_host_configs():
+    result = []
+    for name in [".env", "docker-compose.yml", "compose.yml", "docker-compose.override.yml", "compose.override.yml"]:
+        p = PROJECT_ROOT / name
+        if p.is_file():
+            result.append({"source": "host", "path": name, "label": name})
+
+    modules = PROJECT_ROOT / "modules"
+    if modules.is_dir():
+        for p in sorted(modules.glob("*/conf/*")):
+            if p.is_file() and (p.name.endswith(".conf") or p.name.endswith(".conf.dist")):
+                result.append({
+                    "source": "host",
+                    "path": str(p.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                    "label": str(p.relative_to(PROJECT_ROOT))
+                })
+    return result
+
+def list_active_configs():
+    if not docker_available() or not container_exists("ac-worldserver"):
+        return []
+
+    # docker cp works on stopped containers too.
+    tmp = Path(tempfile.mkdtemp(prefix="ac-dashboard-"))
+    try:
+        dest = tmp / "modules"
+        dest.mkdir()
+        r = run(["docker", "cp", f"ac-worldserver:{ACTIVE_CONF_DIR}/.", str(dest)], timeout=20)
+        if not r["ok"]:
+            return []
+        items = []
+        for p in sorted(dest.glob("*.conf")):
+            items.append({"source": "container", "path": p.name, "label": f"ACTIVE: {p.name}"})
+        return items
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+def read_active_config(name):
+    if "/" in name or "\\" in name or name in ("", ".", ".."):
+        raise ValueError("Invalid config name")
+    tmp = Path(tempfile.mkdtemp(prefix="ac-dashboard-"))
+    try:
+        f = tmp / name
+        r = run(["docker", "cp", f"ac-worldserver:{ACTIVE_CONF_DIR}/{name}", str(f)], timeout=15)
+        if not r["ok"] or not f.exists():
+            raise FileNotFoundError(r["output"])
+        return f.read_text(encoding="utf-8", errors="replace")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+def write_active_config(name, content):
+    old = read_active_config(name)
+    backup_text(f"ACTIVE-{name}", old)
+    tmp = Path(tempfile.mkdtemp(prefix="ac-dashboard-"))
+    try:
+        f = tmp / name
+        f.write_text(content, encoding="utf-8")
+        r = run(["docker", "cp", str(f), f"ac-worldserver:{ACTIVE_CONF_DIR}/{name}"], timeout=20)
+        if not r["ok"]:
+            raise RuntimeError(r["output"])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+def _new_console_flags():
+    return getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+
+def launch_powershell_file(relative_path, title="AzerothCore"):
+    script = safe_host_path(relative_path)
+    if not script.is_file():
+        return {"ok": False, "code": -1, "output": f"Script introuvable: {script}"}
+
+    # IMPORTANT: pass -File and the script path as SEPARATE argv items.
+    # Do not embed quotes in a cmd.exe command string.
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoExit",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", str(script),
+        ],
+        cwd=str(PROJECT_ROOT),
+        creationflags=_new_console_flags()
+    )
+    return {"ok": True, "code": 0, "output": f"Lancé: {script}"}
+
+def launch_powershell_command(command, title="AzerothCore"):
+    # Used for simple commands such as live Docker logs.
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoExit",
+            "-NoProfile",
+            "-Command", command,
+        ],
+        cwd=str(PROJECT_ROOT),
+        creationflags=_new_console_flags()
+    )
+    return {"ok": True, "code": 0, "output": f"Lancé: {command}"}
+
+def open_path(path):
+    p = safe_host_path(path)
+    if not p.exists():
+        p.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen(["explorer.exe", str(p)])
+    return {"ok": True, "code": 0, "output": str(p)}
+
+ACTIONS = {
+    "start": lambda: run(["docker", "compose", "up", "-d"], timeout=90),
+    "stop": lambda: run(["docker", "compose", "stop"], timeout=90),
+    "restart_world": lambda: run(["docker", "compose", "restart", "ac-worldserver"], timeout=90),
+    "restart_all": lambda: run(["docker", "compose", "restart"], timeout=90),
+    "recreate_world": lambda: run(["docker", "compose", "up", "-d", "--force-recreate", "ac-worldserver"], timeout=120),
+    "validate_compose": lambda: run(["docker", "compose", "config"], timeout=45),
+    "patch_gather": lambda: launch_powershell_file(
+        r"modules\mod-server-customization\apply-playerbots-gather-only.ps1",
+        "Patch gather"
+    ),
+    "patch_selfbot": lambda: launch_powershell_file(
+        r"modules\mod-server-customization\apply-playerbots-selfbot-lock.ps1",
+        "Patch selfbot"
+    ),
+    "rebuild": lambda: launch_powershell_file(
+        r"rebuild-azerothcore.ps1",
+        "AzerothCore rebuild"
+    ),
+    "patch_rebuild": lambda: launch_powershell_file(
+        r"patch-and-rebuild.ps1",
+        "Patch + rebuild"
+    ),
+    "logs_live": lambda: launch_powershell_command(
+        "docker compose logs -f ac-worldserver",
+        "Worldserver logs"
+    ),
+    "open_root": lambda: open_path("."),
+    "open_modules": lambda: open_path("modules"),
+    "open_config_backups": lambda: open_path("config-backups"),
+    "open_db_backups": lambda: open_path("db-backups"),
+}
+
+
+def env_name_from_ac_key(key):
+    # AzerothCore Docker mapping:
+    # AC_ prefix, dots -> underscores, camelCase/PascalCase boundary -> underscore, uppercase.
+    # Example MaxPrimaryTradeSkill -> AC_MAX_PRIMARY_TRADE_SKILL
+    s = key.replace(".", "_")
+    s = __import__("re").sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+    s = __import__("re").sub(r"__+", "_", s)
+    return "AC_" + s.upper()
+
+def parse_conf_options(text):
+    options = []
+    pending_comments = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if pending_comments and pending_comments[-1] != "":
+                pending_comments.append("")
+            continue
+        if line.startswith("#") or line.startswith(";"):
+            cleaned = line[1:].strip()
+            if cleaned:
+                pending_comments.append(cleaned)
+            continue
+        m = __import__("re").match(r"^([A-Za-z0-9_.-]+)\s*=\s*(.*?)\s*$", raw)
+        if not m:
+            pending_comments = []
+            continue
+        key, default = m.group(1), m.group(2)
+        desc = " ".join(x for x in pending_comments[-8:] if x)
+        options.append({
+            "key": key,
+            "default": default,
+            "env": env_name_from_ac_key(key),
+            "description": desc[:1200],
+        })
+        pending_comments = []
+    return options
+
+def read_worldserver_dist():
+    candidates = [
+        PROJECT_ROOT / "env" / "dist" / "etc" / "worldserver.conf.dist",
+        PROJECT_ROOT / "conf" / "dist" / "worldserver.conf.dist",
+        PROJECT_ROOT / "src" / "server" / "worldserver" / "worldserver.conf.dist",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p.read_text(encoding="utf-8", errors="replace"), str(p)
+
+    if docker_available() and container_exists("ac-worldserver"):
+        tmp = Path(tempfile.mkdtemp(prefix="ac-dashboard-worldconf-"))
+        try:
+            f = tmp / "worldserver.conf.dist"
+            for container_path in [
+                "/azerothcore/env/dist/etc/worldserver.conf.dist",
+                "/azerothcore/conf/dist/worldserver.conf.dist",
+            ]:
+                r = run(["docker", "cp", f"ac-worldserver:{container_path}", str(f)], timeout=15)
+                if r["ok"] and f.exists():
+                    return f.read_text(encoding="utf-8", errors="replace"), f"ac-worldserver:{container_path}"
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    raise FileNotFoundError("worldserver.conf.dist introuvable dans le repo ou le conteneur.")
+
+def _leading_spaces(s):
+    return len(s) - len(s.lstrip(" "))
+
+def add_or_update_override_env(env_name, value, original_key):
+    override = PROJECT_ROOT / "docker-compose.override.yml"
+    if override.exists():
+        old = override.read_text(encoding="utf-8", errors="replace")
+    else:
+        old = ""
+
+    backup_text("docker-compose.override.yml", old)
+
+    # Quote as a YAML string and escape embedded quotes/backslashes.
+    safe_value = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    setting_line = f'      {env_name}: "{safe_value}" # {original_key}'
+
+    lines = old.splitlines()
+    found_existing = False
+    env_re = __import__("re").compile(rf"^(\s*){__import__('re').escape(env_name)}\s*:")
+    for i, line in enumerate(lines):
+        if env_re.match(line):
+            indent = env_re.match(line).group(1)
+            lines[i] = f'{indent}{env_name}: "{safe_value}" # {original_key}'
+            found_existing = True
+            break
+
+    if not found_existing:
+        # Find services -> ac-worldserver -> environment mapping.
+        world_i = env_i = None
+        world_indent = None
+        for i, line in enumerate(lines):
+            if __import__("re").match(r"^\s*ac-worldserver\s*:\s*$", line):
+                world_i = i
+                world_indent = _leading_spaces(line)
+                break
+
+        if world_i is not None:
+            for j in range(world_i + 1, len(lines)):
+                stripped = lines[j].strip()
+                indent = _leading_spaces(lines[j])
+                if stripped and indent <= world_indent:
+                    break
+                if __import__("re").match(r"^\s*environment\s*:\s*$", lines[j]):
+                    env_i = j
+                    env_indent = indent
+                    break
+
+        if env_i is not None:
+            # Reject list-style environment blocks; our project uses mapping style.
+            for j in range(env_i + 1, len(lines)):
+                stripped = lines[j].strip()
+                indent = _leading_spaces(lines[j])
+                if stripped and indent <= env_indent:
+                    break
+                if stripped.startswith("- "):
+                    raise RuntimeError("Le bloc environment de ac-worldserver est en syntaxe liste. Ajout automatique annulé pour éviter d'endommager le YAML.")
+
+            insert_at = env_i + 1
+            while insert_at < len(lines):
+                stripped = lines[insert_at].strip()
+                indent = _leading_spaces(lines[insert_at])
+                if stripped and indent <= env_indent:
+                    break
+                insert_at += 1
+            lines.insert(insert_at, setting_line)
+        elif world_i is not None:
+            insert_at = world_i + 1
+            child_indent = " " * (world_indent + 2)
+            lines[insert_at:insert_at] = [
+                f"{child_indent}environment:",
+                setting_line
+            ]
+        else:
+            prefix = []
+            if old.strip():
+                prefix = lines + [""]
+            lines = prefix + [
+                "services:",
+                "  ac-worldserver:",
+                "    environment:",
+                setting_line,
+            ]
+
+    new_text = "\n".join(lines).rstrip() + "\n"
+    override.write_text(new_text, encoding="utf-8")
+
+    # Validate. If invalid, restore exact previous content.
+    validate = run(["docker", "compose", "config"], timeout=45)
+    if not validate["ok"]:
+        override.write_text(old, encoding="utf-8")
+        raise RuntimeError("docker compose config a échoué; le fichier précédent a été restauré.\n\n" + validate["output"])
+
+    return {
+        "ok": True,
+        "output": f"{env_name} ajouté/mis à jour dans docker-compose.override.yml.\n\n{validate['output'][-2500:]}",
+        "env": env_name,
+        "key": original_key,
+        "value": value,
+    }
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "AzerothCoreDashboard/0.1"
+
+    def log_message(self, fmt, *args):
+        print("[%s] %s" % (self.log_date_time_string(), fmt % args))
+
+    def send_json(self, data, status=200):
+        raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def send_file(self, p):
+        p = Path(p)
+        if not p.exists() or not p.is_file():
+            self.send_error(404)
+            return
+        data = p.read_bytes()
+        ctype = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith("text/") else ""))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def body_json(self):
+        n = int(self.headers.get("Content-Length", "0"))
+        return json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qs(u.query)
+
+        if u.path == "/":
+            return self.send_file(PROJECT_ROOT / "dashboard.html")
+        if u.path == "/docs/commands":
+            return self.send_file(PROJECT_ROOT / "azerothcore-commandes-joueur.html")
+        if u.path == "/docs/maintenance":
+            return self.send_file(PROJECT_ROOT / "azerothcore-maintenance-guide.html")
+
+        if u.path == "/api/status":
+            docker = docker_available()
+            raw = run(["docker", "compose", "ps"], timeout=15) if docker else {"ok": False, "output": "Docker unavailable", "code": -1}
+            services = {}
+            for name in ["ac-database", "ac-authserver", "ac-worldserver"]:
+                services[name] = {
+                    "exists": container_exists(name) if docker else False,
+                    "running": container_running(name) if docker else False,
+                }
+            return self.send_json({"docker": docker, "services": services, "raw": raw["output"]})
+
+        if u.path == "/api/logs":
+            tail = max(20, min(1000, int(q.get("tail", ["200"])[0])))
+            r = run(["docker", "compose", "logs", f"--tail={tail}", "ac-worldserver"], timeout=20)
+            return self.send_json(r)
+
+        if u.path == "/api/configs":
+            return self.send_json({"host": list_host_configs(), "active": list_active_configs()})
+
+        if u.path == "/api/config":
+            source = q.get("source", ["host"])[0]
+            path = q.get("path", [""])[0]
+            try:
+                if source == "container":
+                    content = read_active_config(path)
+                else:
+                    p = safe_host_path(path)
+                    content = p.read_text(encoding="utf-8", errors="replace")
+                return self.send_json({"ok": True, "source": source, "path": path, "content": content})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 400)
+
+        if u.path == "/api/ac_options":
+            try:
+                text, source = read_worldserver_dist()
+                opts = parse_conf_options(text)
+                return self.send_json({"ok": True, "source": source, "count": len(opts), "options": opts})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 400)
+
+        if u.path == "/api/override":
+            try:
+                p = PROJECT_ROOT / "docker-compose.override.yml"
+                content = p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
+                return self.send_json({"ok": True, "content": content})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 400)
+
+        self.send_error(404)
+
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        try:
+            data = self.body_json()
+        except Exception as e:
+            return self.send_json({"ok": False, "output": f"Invalid JSON: {e}"}, 400)
+
+        if u.path == "/api/action":
+            name = data.get("name", "")
+            fn = ACTIONS.get(name)
+            if not fn:
+                return self.send_json({"ok": False, "output": "Unknown action"}, 400)
+            try:
+                return self.send_json(fn())
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 500)
+
+        if u.path == "/api/config":
+            source = data.get("source", "host")
+            path = data.get("path", "")
+            content = data.get("content", "")
+            try:
+                if source == "container":
+                    write_active_config(path, content)
+                else:
+                    p = safe_host_path(path)
+                    if not p.exists():
+                        raise FileNotFoundError(path)
+                    old = p.read_text(encoding="utf-8", errors="replace")
+                    backup_text(str(p.relative_to(PROJECT_ROOT)), old)
+                    p.write_text(content, encoding="utf-8")
+                return self.send_json({"ok": True, "output": "Saved with automatic backup."})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 400)
+
+        if u.path == "/api/override/add":
+            key = str(data.get("key", "")).strip()
+            value = str(data.get("value", "")).strip()
+            if not key:
+                return self.send_json({"ok": False, "output": "Option AzerothCore manquante."}, 400)
+            try:
+                expected_env = env_name_from_ac_key(key)
+                supplied = str(data.get("env", expected_env)).strip()
+                if supplied != expected_env:
+                    return self.send_json({"ok": False, "output": f"Nom env inattendu. Attendu: {expected_env}"}, 400)
+                return self.send_json(add_or_update_override_env(expected_env, value, key))
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 400)
+
+        self.send_error(404)
+
+def main():
+    if not PROJECT_ROOT.exists():
+        print(f"Project folder not found: {PROJECT_ROOT}")
+        input("Press Enter...")
+        return
+    print(f"AzerothCore dashboard: http://{HOST}:{PORT}/")
+    print("Local-only server. Ctrl+C to stop.")
+    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+
+if __name__ == "__main__":
+    main()
