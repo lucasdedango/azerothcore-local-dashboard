@@ -323,11 +323,37 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
     l'avoir examiné et sans sauvegarde adaptée. Le dashboard refuse aussi de remplacer un dossier de module existant.
   </div>
 
+  <h3>Supprimer un module</h3>
+  <p>Dans <strong>Modules &amp; dossiers → État des modules</strong>, cliquer sur <strong>Supprimer…</strong>. Le
+    dashboard présente séparément le dossier du module, ses configurations actives détectées et les éventuels
+    scripts SQL de désinstallation. Choisir les éléments voulus, relire le récapitulatif, puis saisir exactement
+    le nom du module pour confirmer. Les configurations actives sélectionnées sont sauvegardées avant suppression.</p>
+  <div class="danger">
+    Le nettoyage SQL est désactivé par défaut et modifie réellement la base. Il n'est proposé que lorsqu'un script
+    dont le nom indique explicitement une désinstallation (<code>uninstall</code>, <code>remove</code>,
+    <code>delete</code> ou <code>drop</code>) se trouve sous le dossier SQL d'une base identifiable. Lire ce script
+    et effectuer une sauvegarde DB avant de confirmer : le dashboard ne peut pas annuler son exécution. Si un script
+    SQL échoue, le dossier du module est conservé. Après toute suppression de module, lancer un rebuild.
+  </div>
+
   <div class="note">
     L'onglet <strong>Modules &amp; dossiers</strong> du dashboard vérifie automatiquement l'état de chaque module.
     Cette vérification est en lecture seule : elle compare un clone Git indépendant à son propre dépôt distant,
     ou les modules copiés au dépôt custom groupé. Aucun fichier de module, aucune configuration et aucune base
     de données ne sont modifiés par ce contrôle.
+  </div>
+
+  <h3>Mise à jour assistée</h3>
+  <p>Lorsqu'une différence est détectée et que la source distante est connue, cliquer sur
+    <strong>Mettre à jour</strong> puis confirmer. Le dashboard télécharge la nouvelle version dans un dossier
+    temporaire, vérifie son <code>CMakeLists.txt</code>, déplace la version locale complète dans
+    <code>module-backups</code>, puis publie la nouvelle version. Une erreur avant le remplacement laisse le module
+    intact ; une erreur pendant le remplacement restaure automatiquement la sauvegarde.</p>
+  <div class="danger">
+    La sauvegarde contient aussi les modifications locales non commitées, mais celles-ci ne sont pas fusionnées dans
+    la nouvelle version. Examiner le backup pour les reporter si nécessaire. La mise à jour n'exécute aucun SQL, ne
+    change aucune configuration et ne lance aucun rebuild : lire les notes du module, appliquer manuellement les
+    migrations nécessaires avec une sauvegarde adaptée, puis lancer <strong>Rebuild AzerothCore</strong>.
   </div>
 
   <ol>

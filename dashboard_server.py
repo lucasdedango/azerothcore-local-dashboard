@@ -40,7 +40,7 @@ MAX_UPDATE_FILES = 100
 MAX_UPDATE_BYTES = 10 * 1024 * 1024
 MAX_MANIFEST_BYTES = 256 * 1024
 FORBIDDEN_UPDATE_ROOTS = frozenset((
-    "modules", "env", "config-backups", "dashboard-backups",
+    "modules", "env", "config-backups", "dashboard-backups", "module-backups",
     "docker", "docker-data", "data", "mysql-data",
 ))
 UPDATE_CACHE_SECONDS = 300
@@ -50,7 +50,7 @@ MAX_CATALOGUE_BYTES = 5 * 1024 * 1024
 _archive_cache = {}
 _archive_cache_lock = threading.Lock()
 _dashboard_update_lock = threading.Lock()
-_module_install_lock = threading.Lock()
+_module_operation_lock = threading.Lock()
 _catalogue_cache = None
 _catalogue_cache_time = 0.0
 
@@ -327,8 +327,8 @@ def catalogue_modules(force=False):
 
 def install_catalogue_module(full_name):
     """Clone one validated catalogue module atomically into PROJECT_ROOT/modules."""
-    if not _module_install_lock.acquire(blocking=False):
-        return {"ok": False, "code": -1, "output": "Une installation de module est déjà en cours."}
+    if not _module_operation_lock.acquire(blocking=False):
+        return {"ok": False, "code": -1, "output": "Une opération sur un module est déjà en cours."}
     stage_root = None
     try:
         matches = [item for item in catalogue_modules(force=True) if item["full_name"] == full_name]
@@ -363,7 +363,174 @@ def install_catalogue_module(full_name):
     finally:
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=True)
-        _module_install_lock.release()
+        _module_operation_lock.release()
+
+
+def update_local_module(name):
+    """Stage, validate and replace one known module while retaining a full backup."""
+    if not _module_operation_lock.acquire(blocking=False):
+        return {"ok": False, "code": -1, "output": "Une opération sur un module est déjà en cours."}
+    stage_root = None
+    backup = None
+    destination = None
+    try:
+        destination = _validated_local_module(name)
+        status = next((item for item in module_update_statuses()
+                       if item["name"] == name and item["installed"]), None)
+        if not status or status["up_to_date"] is None:
+            raise RuntimeError("La source distante de ce module n'est pas connue; mise à jour automatique refusée.")
+        if status["up_to_date"]:
+            raise RuntimeError(f"{name} est déjà à jour.")
+
+        modules_root = destination.parent
+        stage_root = Path(tempfile.mkdtemp(prefix=".dashboard-update-", dir=modules_root))
+        staged = stage_root / name
+        if status.get("branch"):
+            result = run([
+                "git", "clone", "--depth", "1", "--single-branch", "--branch", status["branch"],
+                status["source"], str(staged),
+            ], timeout=180)
+            if not result["ok"]:
+                raise RuntimeError("git clone a échoué; le module local est inchangé.\n\n" + result["output"])
+        else:
+            archive = github_archive(MODULES_REPO, force=True)
+            prefix = f"modules/{name}/"
+            files = {path[len(prefix):]: content for path, content in archive.items()
+                     if path.startswith(prefix) and len(path) > len(prefix)}
+            if not files:
+                raise RuntimeError("Le module n'existe plus dans le dépôt custom; mise à jour refusée.")
+            for relative, content in files.items():
+                target = staged / Path(relative)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+
+        if not (staged / "CMakeLists.txt").is_file():
+            raise RuntimeError("La nouvelle version ne contient pas de CMakeLists.txt racine; mise à jour annulée.")
+
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = PROJECT_ROOT / "module-backups" / stamp / name
+        backup.parent.mkdir(parents=True, exist_ok=False)
+        os.replace(destination, backup)
+        try:
+            os.replace(staged, destination)
+        except Exception:
+            os.replace(backup, destination)
+            raise
+        return {
+            "ok": True,
+            "code": 0,
+            "output": f"{name} mis à jour. Ancienne version sauvegardée dans {backup}. Lancez un Rebuild AzerothCore.",
+            "backup": str(backup),
+        }
+    except Exception as e:
+        return {"ok": False, "code": -1, "output": str(e)}
+    finally:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
+        _module_operation_lock.release()
+
+
+def _validated_local_module(name):
+    """Return a real, direct child of modules; never follow a user supplied path."""
+    if not isinstance(name, str) or not re.fullmatch(r"mod-[A-Za-z0-9_.-]+", name):
+        raise ValueError("Nom de module invalide.")
+    modules_root = (PROJECT_ROOT / "modules").resolve()
+    candidate = modules_root / name
+    if not candidate.is_dir() or candidate.is_symlink() or candidate.resolve().parent != modules_root:
+        raise FileNotFoundError(f"Module local introuvable: {name}")
+    return candidate
+
+
+def module_removal_plan(name):
+    """Describe removable artifacts without changing the module or a database."""
+    module = _validated_local_module(name)
+    config_names = set()
+    conf_dir = module / "conf"
+    if conf_dir.is_dir():
+        for path in conf_dir.iterdir():
+            if path.is_file() and (path.name.endswith(".conf") or path.name.endswith(".conf.dist")):
+                config_names.add(path.name.removesuffix(".dist"))
+
+    active = []
+    try:
+        available = {item["path"] for item in list_active_configs()}
+        active = sorted(config_names & available)
+    except Exception:
+        # The folder can still be removed when Docker is unavailable. The UI
+        # explicitly reports that no active config was discovered.
+        active = []
+
+    sql = []
+    sql_root = module / "sql"
+    if sql_root.is_dir():
+        for path in sql_root.rglob("*.sql"):
+            relative = path.relative_to(module).as_posix()
+            lowered = path.name.casefold()
+            if any(word in lowered for word in ("uninstall", "remove", "delete", "drop")):
+                parts = {part.casefold() for part in path.relative_to(sql_root).parts[:-1]}
+                databases = [
+                    db for db in ("world", "characters", "auth")
+                    if any(part in (db, f"db-{db}", f"db_{db}") for part in parts)
+                ]
+                if len(databases) == 1:
+                    sql.append({"path": relative, "database": f"acore_{databases[0]}"})
+    return {
+        "name": name,
+        "folder": f"modules/{name}",
+        "configs": active,
+        "sql": sorted(sql, key=lambda item: item["path"]),
+    }
+
+
+def _execute_module_uninstall_sql(module, scripts):
+    if not docker_available() or not container_running("ac-database"):
+        raise RuntimeError("La base ac-database doit être démarrée pour supprimer le SQL du module.")
+    for item in scripts:
+        sql_path = module / Path(item["path"])
+        payload = sql_path.read_bytes()
+        command = ["docker", "exec", "-i", "ac-database", "mysql", "-uroot", "-ppassword", item["database"]]
+        proc = subprocess.run(command, cwd=PROJECT_ROOT, input=payload, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=120)
+        if proc.returncode:
+            output = proc.stdout.decode("utf-8", "replace")
+            raise RuntimeError(f"Échec du script {item['path']}; le dossier du module a été conservé.\n\n{output}")
+
+
+def remove_local_module(name, remove_configs=False, remove_sql=False, confirmation=""):
+    """Remove one module after an exact-name confirmation and optional cleanup."""
+    if confirmation != name:
+        return {"ok": False, "code": -1, "output": "Confirmation invalide: saisissez exactement le nom du module."}
+    if not _module_operation_lock.acquire(blocking=False):
+        return {"ok": False, "code": -1, "output": "Une opération sur un module est déjà en cours."}
+    try:
+        module = _validated_local_module(name)
+        plan = module_removal_plan(name)
+        if remove_sql:
+            if not plan["sql"]:
+                raise RuntimeError("Aucun script SQL de désinstallation explicite et attribuable à une base n'a été trouvé.")
+            _execute_module_uninstall_sql(module, plan["sql"])
+
+        removed_configs = []
+        if remove_configs:
+            for config_name in plan["configs"]:
+                content = read_active_config(config_name)
+                backup_text(f"REMOVED-ACTIVE-{config_name}", content)
+                result = run(["docker", "exec", "ac-worldserver", "rm", "--", f"{ACTIVE_CONF_DIR}/{config_name}"], timeout=20)
+                if not result["ok"]:
+                    raise RuntimeError(f"Suppression de {config_name} impossible; le dossier du module a été conservé.\n\n{result['output']}")
+                removed_configs.append(config_name)
+
+        shutil.rmtree(module)
+        details = [f"dossier {plan['folder']}"]
+        if removed_configs:
+            details.append("config(s) active(s) sauvegardée(s) puis supprimée(s): " + ", ".join(removed_configs))
+        if remove_sql:
+            details.append("script(s) SQL exécuté(s): " + ", ".join(item["path"] for item in plan["sql"]))
+        return {"ok": True, "code": 0, "output": f"{name} supprimé ({'; '.join(details)}). Lancez un Rebuild AzerothCore.", "removed": plan}
+    except Exception as e:
+        return {"ok": False, "code": -1, "output": str(e)}
+    finally:
+        _module_operation_lock.release()
 
 
 def install_dashboard_update():
@@ -822,6 +989,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send_json({"ok": False, "output": f"Catalogue indisponible: {e}"}, 502)
 
+        if u.path == "/api/modules/removal-plan":
+            try:
+                return self.send_json({"ok": True, "plan": module_removal_plan(q.get("name", [""])[0])})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": str(e)}, 400)
+
         if u.path == "/api/logs":
             tail = max(20, min(1000, int(q.get("tail", ["200"])[0])))
             r = run(["docker", "compose", "logs", f"--tail={tail}", "ac-worldserver"], timeout=20)
@@ -889,6 +1062,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"ok": False, "output": "Confirmation explicite manquante."}, 400)
             full_name = str(data.get("full_name", "")).strip()
             result = install_catalogue_module(full_name)
+            return self.send_json(result, 200 if result["ok"] else 400)
+
+        if u.path == "/api/modules/update":
+            if data.get("confirmed") is not True:
+                return self.send_json({"ok": False, "output": "Confirmation explicite manquante."}, 400)
+            result = update_local_module(str(data.get("name", "")).strip())
+            return self.send_json(result, 200 if result["ok"] else 400)
+
+        if u.path == "/api/modules/remove":
+            name = str(data.get("name", "")).strip()
+            result = remove_local_module(
+                name,
+                remove_configs=data.get("remove_configs") is True,
+                remove_sql=data.get("remove_sql") is True,
+                confirmation=str(data.get("confirmation", "")),
+            )
             return self.send_json(result, 200 if result["ok"] else 400)
 
         if u.path == "/api/config":

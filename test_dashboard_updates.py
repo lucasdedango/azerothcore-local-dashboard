@@ -229,5 +229,123 @@ class CatalogueModuleTests(unittest.TestCase):
         self.assertFalse(unknown["ok"])
 
 
+class RemoveModuleTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.project_patch = mock.patch.object(dashboard, "PROJECT_ROOT", self.root)
+        self.project_patch.start()
+        self.module = self.root / "modules" / "mod-example"
+        (self.module / "conf").mkdir(parents=True)
+        (self.module / "conf" / "example.conf.dist").write_text("Enabled = 1", encoding="utf-8")
+
+    def tearDown(self):
+        self.project_patch.stop()
+        self.temp.cleanup()
+
+    def test_plan_only_offers_explicit_uninstall_sql_with_known_database(self):
+        sql = self.module / "sql"
+        (sql / "db-world").mkdir(parents=True)
+        (sql / "db-world" / "uninstall.sql").write_text("DELETE FROM example;", encoding="utf-8")
+        (sql / "db-world" / "install.sql").write_text("INSERT INTO example VALUES (1);", encoding="utf-8")
+        (sql / "misc").mkdir()
+        (sql / "misc" / "drop.sql").write_text("DROP TABLE example;", encoding="utf-8")
+
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[{"path": "example.conf"}]):
+            plan = dashboard.module_removal_plan("mod-example")
+
+        self.assertEqual(plan["configs"], ["example.conf"])
+        self.assertEqual(plan["sql"], [{"path": "sql/db-world/uninstall.sql", "database": "acore_world"}])
+
+    def test_removal_requires_exact_name_confirmation(self):
+        result = dashboard.remove_local_module("mod-example", confirmation="yes")
+        self.assertFalse(result["ok"])
+        self.assertTrue(self.module.is_dir())
+
+    def test_removal_deletes_folder_without_touching_optional_artifacts(self):
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[{"path": "example.conf"}]), \
+                mock.patch.object(dashboard, "read_active_config") as read_config, \
+                mock.patch.object(dashboard, "_execute_module_uninstall_sql") as sql:
+            result = dashboard.remove_local_module("mod-example", confirmation="mod-example")
+
+        self.assertTrue(result["ok"], result["output"])
+        self.assertFalse(self.module.exists())
+        read_config.assert_not_called()
+        sql.assert_not_called()
+
+    def test_sql_request_without_safe_uninstall_script_preserves_module(self):
+        with mock.patch.object(dashboard, "list_active_configs", return_value=[]):
+            result = dashboard.remove_local_module("mod-example", remove_sql=True,
+                                                   confirmation="mod-example")
+        self.assertFalse(result["ok"])
+        self.assertIn("Aucun script SQL", result["output"])
+        self.assertTrue(self.module.is_dir())
+
+
+class UpdateModuleTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.project_patch = mock.patch.object(dashboard, "PROJECT_ROOT", self.root)
+        self.project_patch.start()
+        self.module = self.root / "modules" / "mod-example"
+        self.module.mkdir(parents=True)
+        (self.module / "CMakeLists.txt").write_text("old", encoding="utf-8")
+        (self.module / "local.txt").write_text("keep in backup", encoding="utf-8")
+
+    def tearDown(self):
+        self.project_patch.stop()
+        self.temp.cleanup()
+
+    def status(self):
+        return [{"name": "mod-example", "installed": True, "up_to_date": False,
+                 "source": f"https://github.com/{dashboard.MODULES_REPO}"}]
+
+    def test_grouped_update_replaces_module_and_keeps_complete_backup(self):
+        archive = {
+            "modules/mod-example/CMakeLists.txt": b"new",
+            "modules/mod-example/src/new.cpp": b"code",
+        }
+        with mock.patch.object(dashboard, "module_update_statuses", return_value=self.status()), \
+                mock.patch.object(dashboard, "github_archive", return_value=archive):
+            result = dashboard.update_local_module("mod-example")
+
+        self.assertTrue(result["ok"], result["output"])
+        self.assertEqual((self.module / "CMakeLists.txt").read_text(encoding="utf-8"), "new")
+        self.assertFalse((self.module / "local.txt").exists())
+        backup = Path(result["backup"])
+        self.assertEqual((backup / "local.txt").read_text(encoding="utf-8"), "keep in backup")
+
+    def test_invalid_remote_version_preserves_local_module(self):
+        archive = {"modules/mod-example/README.md": b"missing cmake"}
+        with mock.patch.object(dashboard, "module_update_statuses", return_value=self.status()), \
+                mock.patch.object(dashboard, "github_archive", return_value=archive):
+            result = dashboard.update_local_module("mod-example")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual((self.module / "CMakeLists.txt").read_text(encoding="utf-8"), "old")
+        self.assertFalse((self.root / "module-backups").exists())
+
+    def test_publish_failure_restores_backup_automatically(self):
+        archive = {"modules/mod-example/CMakeLists.txt": b"new"}
+        real_replace = dashboard.os.replace
+        calls = 0
+
+        def fail_publish(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("simulated publish failure")
+            return real_replace(source, destination)
+
+        with mock.patch.object(dashboard, "module_update_statuses", return_value=self.status()), \
+                mock.patch.object(dashboard, "github_archive", return_value=archive), \
+                mock.patch.object(dashboard.os, "replace", side_effect=fail_publish):
+            result = dashboard.update_local_module("mod-example")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual((self.module / "CMakeLists.txt").read_text(encoding="utf-8"), "old")
+        self.assertEqual((self.module / "local.txt").read_text(encoding="utf-8"), "keep in backup")
+
 if __name__ == "__main__":
     unittest.main()

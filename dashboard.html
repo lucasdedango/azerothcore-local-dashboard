@@ -192,7 +192,7 @@ async function refreshUpdates(force=false){
     const d=o.dashboard;state.innerHTML=`<i class="dot ${d.up_to_date?'ok':'warn'}"></i>${d.up_to_date?'Dashboard à jour':'Mise à jour disponible'}`;
     state.title=d.changed_files?.length?`Fichiers différents : ${d.changed_files.join(', ')}`:'Tous les fichiers suivis correspondent à la version distante.';
     button.disabled=d.up_to_date;button.textContent='Mettre à jour';updateArmedUntil=0;
-    if(modules)modules.innerHTML=(o.modules||[]).map(m=>{const known=m.up_to_date!==null;const cls=!known?'':(m.up_to_date?'ok':'warn');const label=!known?'Source inconnue':(m.up_to_date?'À jour':(m.installed?'Différent':'Non installé'));return `<div class="module-row"><div><strong>${esc(m.name)}</strong><div class="module-meta">${esc(m.source)}${m.branch?' · '+esc(m.branch):''}</div></div><span class="state"><i class="dot ${cls}"></i>${label}</span></div>`}).join('')||'<div class="muted">Aucun module détecté.</div>';
+    if(modules)modules.innerHTML=(o.modules||[]).map(m=>{const known=m.up_to_date!==null;const cls=!known?'':(m.up_to_date?'ok':'warn');const label=!known?'Source inconnue':(m.up_to_date?'À jour':(m.installed?'Différent':'Non installé'));return `<div class="module-row"><div><strong>${esc(m.name)}</strong><div class="module-meta">${esc(m.source)}${m.branch?' · '+esc(m.branch):''}</div></div><div class="actions"><span class="state"><i class="dot ${cls}"></i>${label}</span>${m.installed&&known&&!m.up_to_date?`<button class="btn warn" data-tip="Sauvegarde la version locale complète puis la remplace par la version distante vérifiée. Aucun SQL, config ou rebuild n'est lancé." onclick='updateModule(${JSON.stringify(m.name)},this)'>Mettre à jour</button>`:''}${m.installed?`<button class="btn danger" data-tip="Prépare la suppression du dossier, de ses configs actives et, en option, de son SQL de désinstallation." onclick='removeModule(${JSON.stringify(m.name)},this)'>Supprimer…</button>`:''}</div></div>`}).join('')||'<div class="muted">Aucun module détecté.</div>';
   }catch(e){updatesLoaded=false;state.innerHTML='<i class="dot bad"></i>Vérification impossible';state.title=e.message;button.disabled=true;if(modules)modules.innerHTML=`<div class="notice">${esc(e.message)}</div>`}
 }
 async function requestDashboardUpdate(){
@@ -213,6 +213,24 @@ function renderCatalogue(){
 async function installModule(fullName,name,button){
   if(!confirm(`Installer ${name} depuis le catalogue AzerothCore ?\n\nLe dépôt sera cloné dans modules, mais aucun SQL ni rebuild ne sera lancé.`))return;button.disabled=true;button.textContent='Installation…';
   try{const o=await api('/api/modules/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:fullName,confirmed:true})});if(!o.ok)throw new Error(o.output||"Échec de l'installation");show(o);const item=catalogue.find(m=>m.full_name===fullName);if(item)item.installed=true;renderCatalogue();updatesLoaded=false;await refreshUpdates(true)}catch(e){button.disabled=false;button.textContent='Réessayer';show({output:e.message})}
+}
+async function updateModule(name,button){
+  if(!confirm(`Mettre à jour ${name} ?\n\nLe dossier local complet, y compris ses modifications non commitées, sera sauvegardé dans module-backups puis remplacé par la version distante. Aucun SQL, aucune config et aucun rebuild ne seront lancés automatiquement.`))return;
+  button.disabled=true;button.textContent='Mise à jour…';
+  try{const o=await api('/api/modules/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');show(o);updatesLoaded=false;await refreshUpdates(true)}catch(e){button.disabled=false;button.textContent='Réessayer';show({output:e.message})}
+}
+async function removeModule(name,button){
+  button.disabled=true;button.textContent='Analyse…';
+  try{
+    const result=await api('/api/modules/removal-plan?name='+encodeURIComponent(name));if(!result.ok)throw new Error(result.output||'Analyse impossible');const p=result.plan;
+    const configs=p.configs||[],sql=p.sql||[];
+    const removeConfigs=configs.length&&confirm(`Supprimer aussi ${configs.length} configuration(s) active(s) ?\n\n${configs.join('\n')}\n\nUne sauvegarde sera créée avant leur suppression.`);
+    const removeSql=sql.length&&confirm(`OPTION DANGEREUSE — supprimer aussi les données SQL de ${name} ?\n\nSeuls ces scripts de désinstallation explicites seront exécutés :\n${sql.map(x=>x.path+' → '+x.database).join('\n')}\n\nCette modification de base de données n'est pas annulable par le dashboard. Annuler conserve le SQL.`);
+    const choices=[`Dossier : ${p.folder}`,removeConfigs?`Configs : ${configs.join(', ')}`:'Configs actives : conservées',removeSql?`SQL : ${sql.map(x=>x.path).join(', ')}`:'SQL : conservé'].join('\n');
+    const confirmation=prompt(`SUPPRESSION DÉFINITIVE\n\n${choices}\n\nUn rebuild sera nécessaire. Pour confirmer exactement ces suppressions, saisissez : ${name}`,'');
+    if(confirmation!==name){button.disabled=false;button.textContent='Supprimer…';return}
+    button.textContent='Suppression…';const o=await api('/api/modules/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,remove_configs:!!removeConfigs,remove_sql:!!removeSql,confirmation})});if(!o.ok)throw new Error(o.output||'Suppression impossible');show(o);catalogue.forEach(x=>{if(x.name===name)x.installed=false});renderCatalogue();updatesLoaded=false;await refreshUpdates(true)
+  }catch(e){button.disabled=false;button.textContent='Réessayer';show({output:e.message})}
 }
 async function refreshLogs(n){const o=await api('/api/logs?tail='+n);$('#logsBox').textContent=o.output||''}setInterval(()=>{if($('#autoLogs')?.checked)refreshLogs(200)},5000);
 
