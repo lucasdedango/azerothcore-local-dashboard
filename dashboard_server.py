@@ -90,6 +90,20 @@ def _remove_temporary_tree(path):
         return f"Nettoyage du dossier temporaire impossible ({path.name}): {e}"
 
 
+def _validate_cpp_module_tree(module_path):
+    """Accept both current AzerothCore modules and the legacy CMake layout."""
+    module_path = Path(module_path)
+    if (module_path / "CMakeLists.txt").is_file():
+        return
+    source_root = module_path / "src"
+    if source_root.is_dir() and any(path.is_file() for path in source_root.rglob("*.cpp")):
+        return
+    raise RuntimeError(
+        "Le dépôt ne ressemble pas à un module C++ AzerothCore: aucun fichier .cpp "
+        "dans src et aucun CMakeLists.txt à la racine; opération annulée."
+    )
+
+
 def _valid_branch_name(branch):
     return (isinstance(branch, str) and 0 < len(branch) <= 200
             and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) is not None
@@ -422,8 +436,7 @@ def install_catalogue_module(full_name):
         if not clone["ok"]:
             details = clone["output"].strip() or f"Git a quitté avec le code {clone['code']} sans message."
             raise RuntimeError("git clone a échoué; aucun module n'a été installé.\n\n" + details)
-        if not (staged / "CMakeLists.txt").is_file():
-            raise RuntimeError("Le dépôt ne contient pas de CMakeLists.txt à sa racine; installation annulée.")
+        _validate_cpp_module_tree(staged)
         os.replace(staged, destination)
         result = {
             "ok": True,
@@ -481,8 +494,7 @@ def update_local_module(name):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
 
-        if not (staged / "CMakeLists.txt").is_file():
-            raise RuntimeError("La nouvelle version ne contient pas de CMakeLists.txt racine; mise à jour annulée.")
+        _validate_cpp_module_tree(staged)
 
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         backup = PROJECT_ROOT / "module-backups" / stamp / name

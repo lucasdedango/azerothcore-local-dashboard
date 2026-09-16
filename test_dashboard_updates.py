@@ -223,15 +223,15 @@ class CatalogueModuleTests(unittest.TestCase):
                          "https://www.azerothcore.org/catalogue.html#/details/12345")
         self.assertFalse(modules[0]["installed"])
 
-    def test_install_is_atomic_and_requires_root_cmake(self):
+    def test_install_is_atomic_and_accepts_current_src_layout(self):
         module = {"name": "mod-example", "full_name": "owner/mod-example", "branch": "main",
                   "source": "https://github.com/owner/mod-example", "description": "", "stars": 1,
                   "installed": False}
 
         def fake_run(command, timeout=45, shell=False):
             staged = Path(command[-1])
-            staged.mkdir(parents=True)
-            (staged / "CMakeLists.txt").write_text("# module", encoding="utf-8")
+            (staged / "src").mkdir(parents=True)
+            (staged / "src" / "example.cpp").write_text("// module", encoding="utf-8")
             return {"ok": True, "code": 0, "output": "cloned"}
 
         with mock.patch.object(dashboard, "catalogue_modules", return_value=[module]), \
@@ -239,8 +239,27 @@ class CatalogueModuleTests(unittest.TestCase):
             result = dashboard.install_catalogue_module("owner/mod-example")
 
         self.assertTrue(result["ok"], result["output"])
-        self.assertTrue((self.root / "modules" / "mod-example" / "CMakeLists.txt").is_file())
+        self.assertTrue((self.root / "modules" / "mod-example" / "src" / "example.cpp").is_file())
         self.assertFalse(list((self.root / "modules").glob(".dashboard-install-*")))
+
+    def test_install_refuses_repository_without_cpp_module_layout(self):
+        module = {"name": "mod-example", "full_name": "owner/mod-example", "branch": "main",
+                  "source": "https://github.com/owner/mod-example", "description": "", "stars": 1,
+                  "installed": False}
+
+        def fake_run(command, timeout=45, shell=False):
+            staged = Path(command[-1])
+            staged.mkdir(parents=True)
+            (staged / "README.md").write_text("not a C++ module", encoding="utf-8")
+            return {"ok": True, "code": 0, "output": "cloned"}
+
+        with mock.patch.object(dashboard, "catalogue_modules", return_value=[module]), \
+                mock.patch.object(dashboard, "run", side_effect=fake_run):
+            result = dashboard.install_catalogue_module("owner/mod-example")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("aucun fichier .cpp dans src", result["output"])
+        self.assertFalse((self.root / "modules" / "mod-example").exists())
 
     def test_install_refuses_unknown_or_existing_module(self):
         module = {"name": "mod-example", "full_name": "owner/mod-example", "branch": "main",

@@ -308,8 +308,9 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
     et ses prérequis, puis cliquer sur <strong>Installer</strong> et confirmer.</p>
   <div class="note">
     Le dashboard accepte uniquement les dépôts GitHub de la catégorie officielle <code>azerothcore-module</code>
-    dont le nom commence par <code>mod-</code>. Il clone le dépôt dans <code>modules</code>, vérifie la présence
-    d'un <code>CMakeLists.txt</code> à la racine et publie le dossier en une seule opération. Il n'exécute aucun
+    dont le nom commence par <code>mod-</code>. Il clone le dépôt dans <code>modules</code>, accepte la structure
+    AzerothCore actuelle (<code>src</code> contenant des fichiers C++) ainsi que l'ancienne structure avec un
+    <code>CMakeLists.txt</code> à la racine, puis publie le dossier en une seule opération. Il n'exécute aucun
     script du module, n'applique aucun SQL et ne lance pas automatiquement le rebuild.
     En cas d'échec, le détail renvoyé par Git est affiché directement sous le module. Le dossier temporaire
     <code>.dashboard-install-*</code> est supprimé automatiquement, y compris lorsque Git a créé des fichiers
@@ -349,7 +350,7 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
   <h3>Mise à jour assistée</h3>
   <p>Lorsqu'une différence est détectée et que la source distante est connue, cliquer sur
     <strong>Mettre à jour</strong> puis confirmer. Le dashboard télécharge la nouvelle version dans un dossier
-    temporaire, vérifie son <code>CMakeLists.txt</code>, déplace la version locale complète dans
+    temporaire, vérifie sa structure de module C++ AzerothCore, déplace la version locale complète dans
     <code>module-backups</code>, puis publie la nouvelle version. Une erreur avant le remplacement laisse le module
     intact ; une erreur pendant le remplacement restaure automatiquement la sauvegarde.</p>
   <div class="danger">

@@ -38,7 +38,7 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - rebuild lancé via le `rebuild.bat` fourni
 - les actions interactives sont ouvertes dans une vraie console Windows
 - la vérification des versions ne modifie aucun module
-- l'installateur refuse les URL libres : il clone uniquement un dépôt encore présent dans la catégorie `azerothcore-module`, avec un nom `mod-*`, et exige un `CMakeLists.txt` racine
+- l'installateur refuse les URL libres : il clone uniquement un dépôt encore présent dans la catégorie `azerothcore-module`, avec un nom `mod-*`, puis accepte la structure actuelle (`src` contenant du C++) ou l'ancienne structure avec un `CMakeLists.txt` racine
 - l'installation est atomique, n'exécute aucun code du module et ne lance automatiquement ni SQL ni rebuild
 - la mise à jour prépare et vérifie la nouvelle version avant remplacement, conserve une sauvegarde complète dans `module-backups` et ne lance automatiquement ni SQL, ni modification de config, ni rebuild
 - la suppression exige de saisir exactement le nom du module ; les configs actives sont sauvegardées avant suppression et le nettoyage SQL, désactivé par défaut, est limité aux scripts de désinstallation explicites attribuables à une base
