@@ -7,13 +7,14 @@
 <style>
 :root{--bg:#0b1017;--panel:#121a24;--panel2:#172230;--line:#263548;--text:#e9f0f7;--muted:#93a4b7;--gold:#d7b35a;--blue:#66aaff;--green:#5fd39a;--red:#ff7b87;--orange:#f5b96b}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#080c11,#0d141d 40%,#0b1118);color:var(--text);font:14px/1.45 Inter,Segoe UI,Arial,sans-serif}
-header{max-width:1500px;margin:auto;padding:24px 22px 12px;display:flex;align-items:end;justify-content:space-between;gap:18px}h1{margin:0;color:#f0d584;font-size:30px}.sub,.muted{color:var(--muted)}.toplinks a{color:#b9d8ff;text-decoration:none;margin-left:14px}
+header{max-width:1500px;margin:auto;padding:24px 22px 12px;display:flex;align-items:end;justify-content:space-between;gap:18px}h1{margin:0;color:#f0d584;font-size:30px}.sub,.muted{color:var(--muted)}.topright{display:flex;flex-direction:column;align-items:flex-end;gap:9px}.toplinks a{color:#b9d8ff;text-decoration:none;margin-left:14px}
 .wrap{max-width:1500px;margin:auto;padding:10px 22px 50px}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 18px}
 button,.btn{position:relative}.tab{border:1px solid var(--line);background:#101923;color:#cbd7e4;padding:9px 12px;border-radius:10px;cursor:pointer}.tab.active{background:#1b2a3a;color:white;border-color:#415a75}
 [data-tip]:hover:after{content:attr(data-tip);position:absolute;z-index:9999;left:50%;top:calc(100% + 8px);transform:translateX(-50%);width:max-content;max-width:330px;background:#03070b;color:#eaf2fa;border:1px solid #3a4a5c;padding:7px 9px;border-radius:8px;font-size:12px;font-weight:400;line-height:1.35;white-space:normal;box-shadow:0 8px 25px #0008;pointer-events:none}
 section{display:none}section.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}.two{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:0 8px 30px #0004}.card h2,.card h3{margin:0 0 8px}
 .statusrow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #223040}.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:7px;background:#667}.dot.ok{background:var(--green)}.dot.bad{background:var(--red)}
+.updatebar{display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--line);border-radius:11px;background:#101923}.dot.warn{background:var(--orange)}.module-list{display:grid;gap:8px;margin-top:12px}.module-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border:1px solid #26374b;background:#0d151e;border-radius:10px}.module-meta{font-size:12px;color:var(--muted);word-break:break-all}.state{white-space:nowrap}.btn:disabled{opacity:.55;cursor:not-allowed}
 .actions,.toolbar{display:flex;flex-wrap:wrap;gap:8px}.btn{display:inline-block;text-decoration:none;border:1px solid #33465b;background:#182536;color:#e8f0f8;padding:9px 12px;border-radius:9px;cursor:pointer}.btn:hover{background:#22344a}.btn.warn{border-color:#6e562e}.btn.danger{border-color:#6b3139}
 pre,.console{background:#070b10;border:1px solid #1e2a38;border-radius:11px;padding:12px;color:#cfe3f9;white-space:pre-wrap;overflow:auto;font-family:Consolas,monospace;max-height:430px}
 select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;border-radius:9px;padding:9px}textarea{width:100%;min-height:330px;font:13px/1.45 Consolas,monospace;resize:vertical}.configline{display:flex;gap:8px;align-items:center}.configline select{flex:1}
@@ -21,15 +22,18 @@ select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;
 .placeholder{opacity:.62;position:relative}.placeholder:after{content:"À venir";position:absolute;top:12px;right:12px;border:1px solid #526070;border-radius:999px;padding:2px 8px;color:#9aabba;font-size:11px}
 .visual-list{margin-top:14px;display:grid;gap:8px}.visual-row{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(220px,1fr);gap:10px;align-items:start;padding:10px;background:#0e1620;border:1px solid #213043;border-radius:10px}.visual-key{font-family:Consolas,monospace;color:#9fd0ff;word-break:break-word}.visual-comment{grid-column:1/-1;color:#8497aa;font-size:12px}.visual-row input{width:100%}
 .searchbox{width:100%;margin:8px 0}.option-list{display:grid;gap:8px;max-height:520px;overflow:auto}.option{border:1px solid #26374b;background:#0d151e;border-radius:10px;padding:10px}.option-head{display:flex;justify-content:space-between;gap:10px}.option code{color:#9fd0ff}.option .desc{color:#8fa1b3;font-size:12px;margin:5px 0}.option-controls{display:flex;gap:8px;align-items:center}.option-controls input{flex:1}
-@media(max-width:900px){.two{grid-template-columns:1fr}.visual-row{grid-template-columns:1fr}header{align-items:start;flex-direction:column}}
+@media(max-width:900px){.two{grid-template-columns:1fr}.visual-row{grid-template-columns:1fr}header{align-items:start;flex-direction:column}.topright{align-items:flex-start}}
 </style>
 </head>
 <body>
 <header>
 <div><h1>AzerothCore Local Dashboard</h1><div class="sub">C:\azerothcore-playerbots · Docker Desktop · Playerbots</div></div>
+<div class="topright">
+<div class="updatebar"><span id="dashboardUpdateState"><i class="dot"></i>Vérification…</span><button id="dashboardUpdateButton" class="btn" data-tip="Télécharge la version main officielle, sauvegarde les fichiers actuels puis met à jour uniquement les fichiers du dashboard." onclick="requestDashboardUpdate()" disabled>Mettre à jour</button></div>
 <div class="toplinks">
 <a href="/docs/commands" target="_blank">📌 Commandes joueur</a>
 <a href="/docs/maintenance" target="_blank">📘 Guide maintenance</a>
+</div>
 </div>
 </header>
 <div class="wrap">
@@ -129,8 +133,7 @@ select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;
 <button class="btn" data-tip="Lance le patch directed gather / grindtarget sur les sources Playerbots." onclick="act('patch_gather')">apply-playerbots-gather-only.ps1</button>
 <button class="btn" data-tip="Lance le patch de restriction selfbot sur les sources Playerbots." onclick="act('patch_selfbot')">apply-playerbots-selfbot-lock.ps1</button>
 </div></div>
-<div class="card placeholder"><h2>Gestion modules</h2><p>Liste des modules, version, branche Git, config présente, SQL détecté, état du patch.</p></div>
-<div class="card placeholder"><h2>Update modules</h2><p>Vérification Git, sauvegarde, pull contrôlé et rebuild optionnel.</p></div>
+<div class="card"><h2>État des modules</h2><p class="muted">Vérification seule : aucun module n'est modifié. Un clone Git indépendant utilise son propre dépôt distant ; sinon la comparaison utilise le dépôt custom groupé.</p><button class="btn" data-tip="Compare à nouveau les fichiers locaux avec leurs sources distantes sans effectuer de mise à jour." onclick="refreshUpdates(true)">Revérifier</button><div id="moduleUpdates" class="module-list"><div class="muted">Vérification…</div></div></div>
 </div></section>
 
 <section id="future"><div class="grid">
@@ -164,11 +167,31 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='configs') loadConfigList();
   if(b.dataset.tab==='override'){loadAcOptions();loadOverride()}
   if(b.dataset.tab==='logs') refreshLogs(100);
+  if(b.dataset.tab==='modules') refreshUpdates();
 });
 async function api(url,opt){const r=await fetch(url,opt);return await r.json()}
 function show(o){$('#output').textContent=o.output??JSON.stringify(o,null,2)}
 async function act(name){$('#output').textContent='Exécution…';const o=await api('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});show(o);setTimeout(refreshStatus,700)}
 async function refreshStatus(){const s=await api('/api/status');const names=['ac-database','ac-authserver','ac-worldserver'];$('#services').innerHTML=`<div class="statusrow"><span>Docker Engine</span><span><i class="dot ${s.docker?'ok':'bad'}"></i>${s.docker?'OK':'OFF'}</span></div>`+names.map(n=>{const x=s.services[n];return `<div class="statusrow"><span>${n}</span><span><i class="dot ${x.running?'ok':'bad'}"></i>${x.running?'RUNNING':(x.exists?'STOPPED':'ABSENT')}</span></div>`}).join('')}
+let updatesLoaded=false,updateArmedUntil=0;
+async function refreshUpdates(force=false){
+  if(updatesLoaded&&!force)return;updatesLoaded=true;
+  const state=$('#dashboardUpdateState'),button=$('#dashboardUpdateButton'),modules=$('#moduleUpdates');
+  state.innerHTML='<i class="dot"></i>Vérification…';if(modules)modules.innerHTML='<div class="muted">Vérification…</div>';
+  try{
+    const o=await api('/api/updates');if(!o.ok)throw new Error(o.output||'Erreur inconnue');
+    const d=o.dashboard;state.innerHTML=`<i class="dot ${d.up_to_date?'ok':'warn'}"></i>${d.up_to_date?'Dashboard à jour':'Mise à jour disponible'}`;
+    state.title=d.changed_files?.length?`Fichiers différents : ${d.changed_files.join(', ')}`:'Tous les fichiers suivis correspondent à la version distante.';
+    button.disabled=d.up_to_date;button.textContent='Mettre à jour';updateArmedUntil=0;
+    if(modules)modules.innerHTML=(o.modules||[]).map(m=>{const known=m.up_to_date!==null;const cls=!known?'':(m.up_to_date?'ok':'warn');const label=!known?'Source inconnue':(m.up_to_date?'À jour':(m.installed?'Différent':'Non installé'));return `<div class="module-row"><div><strong>${esc(m.name)}</strong><div class="module-meta">${esc(m.source)}${m.branch?' · '+esc(m.branch):''}</div></div><span class="state"><i class="dot ${cls}"></i>${label}</span></div>`}).join('')||'<div class="muted">Aucun module détecté.</div>';
+  }catch(e){updatesLoaded=false;state.innerHTML='<i class="dot bad"></i>Vérification impossible';state.title=e.message;button.disabled=true;if(modules)modules.innerHTML=`<div class="notice">${esc(e.message)}</div>`}
+}
+async function requestDashboardUpdate(){
+  const button=$('#dashboardUpdateButton'),now=Date.now();
+  if(now>updateArmedUntil){updateArmedUntil=now+8000;button.textContent='Confirmer la mise à jour';button.classList.add('warn');setTimeout(()=>{if(Date.now()>updateArmedUntil){button.textContent='Mettre à jour';button.classList.remove('warn')}},8100);return}
+  updateArmedUntil=0;button.disabled=true;button.textContent='Mise à jour…';
+  try{const o=await api('/api/dashboard/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');$('#dashboardUpdateState').innerHTML='<i class="dot ok"></i>Mise à jour installée';$('#dashboardUpdateState').title=o.output;button.textContent='Rechargement…';setTimeout(()=>location.reload(),1500)}catch(e){button.disabled=false;button.textContent='Réessayer';button.classList.remove('warn');$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Mise à jour échouée';$('#dashboardUpdateState').title=e.message}
+}
 async function refreshLogs(n){const o=await api('/api/logs?tail='+n);$('#logsBox').textContent=o.output||''}setInterval(()=>{if($('#autoLogs')?.checked)refreshLogs(200)},5000);
 
 let configs=[], currentVisual=[];
@@ -209,6 +232,7 @@ async function loadOverride(){const o=await api('/api/override');$('#overrideRaw
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function escAttr(s){return esc(s)}
 refreshStatus();
+refreshUpdates();
 </script>
 </body>
 </html>

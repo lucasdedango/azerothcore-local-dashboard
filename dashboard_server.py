@@ -12,7 +12,11 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.parse
+import urllib.request
+import zipfile
+from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PROJECT_ROOT = Path(r"C:\azerothcore-playerbots").resolve()
@@ -20,6 +24,23 @@ HOST = "127.0.0.1"
 PORT = 8765
 ACTIVE_CONF_DIR = "/azerothcore/env/dist/etc/modules"
 ALLOWED_EDIT_SUFFIXES = {".conf", ".dist", ".yml", ".yaml", ".env", ".txt", ".json"}
+DASHBOARD_REPO = "lucasdedango/azerothcore-local-dashboard"
+MODULES_REPO = "lucasdedango/azerothcore-custom-modules"
+GITHUB_BRANCH = "main"
+DASHBOARD_FILES = (
+    "dashboard.bat",
+    "dashboard_server.py",
+    "dashboard.html",
+    "README.md",
+    "rebuild.bat",
+    "rebuild-azerothcore.ps1",
+    "patch-and-rebuild.ps1",
+    "azerothcore-maintenance-guide.html",
+)
+UPDATE_CACHE_SECONDS = 300
+_archive_cache = {}
+_archive_cache_lock = threading.Lock()
+_dashboard_update_lock = threading.Lock()
 
 def run(cmd, timeout=45, shell=False):
     try:
@@ -36,6 +57,195 @@ def run(cmd, timeout=45, shell=False):
         return {"ok": False, "code": -1, "output": f"Timeout\n{out}"}
     except Exception as e:
         return {"ok": False, "code": -1, "output": str(e)}
+
+
+def github_archive(repo, branch=GITHUB_BRANCH, force=False):
+    """Return a GitHub branch archive without extracting untrusted paths."""
+    key = (repo, branch)
+    now = time.monotonic()
+    with _archive_cache_lock:
+        cached = _archive_cache.get(key)
+        if cached and not force and now - cached[0] < UPDATE_CACHE_SECONDS:
+            return cached[1]
+
+    url = f"https://codeload.github.com/{repo}/zip/refs/heads/{branch}"
+    request = urllib.request.Request(url, headers={"User-Agent": "AzerothCore-Local-Dashboard"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = response.read(25 * 1024 * 1024 + 1)
+    if len(payload) > 25 * 1024 * 1024:
+        raise RuntimeError("Archive GitHub trop volumineuse (limite: 25 Mo).")
+
+    files = {}
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            parts = Path(info.filename).parts
+            if len(parts) < 2 or ".." in parts:
+                continue
+            relative = Path(*parts[1:]).as_posix()
+            files[relative] = archive.read(info)
+    if not files:
+        raise RuntimeError("L'archive GitHub reçue est vide.")
+    with _archive_cache_lock:
+        _archive_cache[key] = (now, files)
+    return files
+
+
+def _same_file(path, expected):
+    try:
+        return path.is_file() and path.read_bytes() == expected
+    except OSError:
+        return False
+
+
+def _git_module_status(module_path):
+    """Use a module's own Git remote when its directory is an independent clone."""
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(module_path), "rev-parse", "--show-toplevel"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=5, encoding="utf-8", errors="replace",
+        )
+        if top.returncode or Path(top.stdout.strip()).resolve() != module_path.resolve():
+            return None
+        details = {}
+        for key, command in {
+            "local": ["git", "-C", str(module_path), "rev-parse", "HEAD"],
+            "remote": ["git", "-C", str(module_path), "remote", "get-url", "origin"],
+            "branch": ["git", "-C", str(module_path), "branch", "--show-current"],
+            "dirty": ["git", "-C", str(module_path), "status", "--porcelain"],
+        }.items():
+            proc = subprocess.run(
+                command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=8, encoding="utf-8", errors="replace",
+            )
+            if proc.returncode:
+                return None
+            details[key] = proc.stdout.strip()
+        branch = details["branch"] or "HEAD"
+        lookup = subprocess.run(
+            ["git", "ls-remote", details["remote"], f"refs/heads/{branch}"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=20, encoding="utf-8", errors="replace",
+        )
+        if lookup.returncode or not lookup.stdout.strip():
+            raise RuntimeError(lookup.stderr.strip() or f"Branche distante introuvable: {branch}")
+        remote_sha = lookup.stdout.split()[0]
+        return {
+            "name": module_path.name,
+            "installed": True,
+            "up_to_date": details["local"] == remote_sha and not details["dirty"],
+            "changed_files": len(details["dirty"].splitlines()),
+            "source": details["remote"],
+            "branch": branch,
+        }
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f"Git {module_path.name}: {e}") from e
+
+
+def dashboard_update_status():
+    remote = github_archive(DASHBOARD_REPO)
+    compared = [name for name in DASHBOARD_FILES if name in remote]
+    changed = [name for name in compared if not _same_file(PROJECT_ROOT / name, remote[name])]
+    return {
+        "ok": True,
+        "up_to_date": not changed and bool(compared),
+        "changed_files": changed,
+        "compared_files": len(compared),
+        "repository": f"https://github.com/{DASHBOARD_REPO}",
+    }
+
+
+def module_update_statuses():
+    remote = github_archive(MODULES_REPO)
+    remote_modules = sorted({
+        parts[1]
+        for name in remote
+        if len(parts := Path(name).parts) >= 3 and parts[0] == "modules"
+    })
+    local_root = PROJECT_ROOT / "modules"
+    local_modules = {p.name for p in local_root.iterdir() if p.is_dir()} if local_root.is_dir() else set()
+    result = []
+    for module in sorted(set(remote_modules) | local_modules):
+        prefix = f"modules/{module}/"
+        tracked = {name[len(prefix):]: data for name, data in remote.items() if name.startswith(prefix)}
+        local = local_root / module
+        own_git = _git_module_status(local) if local.is_dir() else None
+        if own_git:
+            result.append(own_git)
+            continue
+        if not tracked:
+            result.append({
+                "name": module,
+                "installed": True,
+                "up_to_date": None,
+                "changed_files": 0,
+                "source": "Source distante inconnue",
+            })
+            continue
+        changed = [rel for rel, data in tracked.items() if not _same_file(local / Path(rel), data)]
+        result.append({
+            "name": module,
+            "installed": local.is_dir(),
+            "up_to_date": local.is_dir() and not changed,
+            "changed_files": len(changed),
+            "source": f"https://github.com/{MODULES_REPO}",
+        })
+    return result
+
+
+def install_dashboard_update():
+    """Replace only dashboard-owned files, with a complete rollback on failure."""
+    if not _dashboard_update_lock.acquire(blocking=False):
+        return {"ok": False, "code": -1, "output": "Une mise à jour est déjà en cours."}
+    try:
+        remote = github_archive(DASHBOARD_REPO, force=True)
+        missing = [name for name in DASHBOARD_FILES if name not in remote]
+        if missing:
+            raise RuntimeError("Fichiers absents de la version distante: " + ", ".join(missing))
+
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = PROJECT_ROOT / "dashboard-backups" / stamp
+        stage = Path(tempfile.mkdtemp(prefix="ac-dashboard-update-"))
+        replaced = []
+        try:
+            for name in DASHBOARD_FILES:
+                staged = stage / name
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                staged.write_bytes(remote[name])
+            backup.mkdir(parents=True, exist_ok=False)
+            for name in DASHBOARD_FILES:
+                destination = PROJECT_ROOT / name
+                saved = backup / name
+                if destination.exists():
+                    saved.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(destination, saved)
+                os.replace(stage / name, destination)
+                replaced.append(name)
+        except Exception:
+            for name in replaced:
+                saved = backup / name
+                destination = PROJECT_ROOT / name
+                if saved.exists():
+                    shutil.copy2(saved, destination)
+            raise
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+
+        with _archive_cache_lock:
+            _archive_cache.pop((DASHBOARD_REPO, GITHUB_BRANCH), None)
+        return {
+            "ok": True,
+            "code": 0,
+            "output": f"Dashboard mis à jour. Sauvegarde: {backup}\nRedémarrez le dashboard pour charger le nouveau backend.",
+            "backup": str(backup),
+            "restart_required": True,
+        }
+    except Exception as e:
+        return {"ok": False, "code": -1, "output": f"Mise à jour annulée: {e}"}
+    finally:
+        _dashboard_update_lock.release()
 
 def docker_available():
     return run(["docker", "info"], timeout=8)["ok"]
@@ -422,6 +632,16 @@ class Handler(BaseHTTPRequestHandler):
                 }
             return self.send_json({"docker": docker, "services": services, "raw": raw["output"]})
 
+        if u.path == "/api/updates":
+            try:
+                return self.send_json({
+                    "ok": True,
+                    "dashboard": dashboard_update_status(),
+                    "modules": module_update_statuses(),
+                })
+            except Exception as e:
+                return self.send_json({"ok": False, "output": f"Vérification impossible: {e}"}, 502)
+
         if u.path == "/api/logs":
             tail = max(20, min(1000, int(q.get("tail", ["200"])[0])))
             r = run(["docker", "compose", "logs", f"--tail={tail}", "ac-worldserver"], timeout=20)
@@ -477,6 +697,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(fn())
             except Exception as e:
                 return self.send_json({"ok": False, "output": str(e)}, 500)
+
+        if u.path == "/api/dashboard/update":
+            if data.get("confirmed") is not True:
+                return self.send_json({"ok": False, "output": "Confirmation explicite manquante."}, 400)
+            result = install_dashboard_update()
+            return self.send_json(result, 200 if result["ok"] else 500)
 
         if u.path == "/api/config":
             source = data.get("source", "host")

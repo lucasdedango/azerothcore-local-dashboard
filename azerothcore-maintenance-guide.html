@@ -113,6 +113,7 @@
   <div class="level">Niveau 3 · Maintenance</div>
   <button class="tab" data-target="rebuild">🛠 Recompiler</button>
   <button class="tab" data-target="modules">🧩 Mettre à jour un module</button>
+  <button class="tab" data-target="updatedashboard">🖥 Mettre à jour le dashboard</button>
   <button class="tab" data-target="updatecore">⬆ Mettre à jour le core</button>
 
   <div class="level">Niveau 4 · Dépannage</div>
@@ -301,6 +302,13 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
 <section id="modules">
   <h2>Mettre à jour / remplacer un module</h2>
 
+  <div class="note">
+    L'onglet <strong>Modules &amp; dossiers</strong> du dashboard vérifie automatiquement l'état de chaque module.
+    Cette vérification est en lecture seule : elle compare un clone Git indépendant à son propre dépôt distant,
+    ou les modules copiés au dépôt custom groupé. Aucun fichier de module, aucune configuration et aucune base
+    de données ne sont modifiés par ce contrôle.
+  </div>
+
   <ol>
     <li>Arrêter <code>ac-worldserver</code> et <code>ac-authserver</code>.</li>
     <li>Faire une copie du module <strong>en dehors du dossier modules</strong>.</li>
@@ -318,6 +326,21 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
     Ne mets pas un dossier comme <code>mod-mount-chest-v1-backup</code> dans <code>.\modules</code>.
     AzerothCore le considère comme un vrai module et peut générer une erreur de linker
     <code>undefined reference to Add...Scripts()</code>.
+  </div>
+</section>
+
+<section id="updatedashboard">
+  <h2>Mettre à jour le dashboard</h2>
+  <p>L'indicateur en haut à droite compare les fichiers locaux à la branche <code>main</code> du dépôt officiel.</p>
+  <ol>
+    <li>Cliquer sur <strong>Mettre à jour</strong>.</li>
+    <li>Cliquer une seconde fois sur <strong>Confirmer la mise à jour</strong> dans les huit secondes.</li>
+    <li>Attendre le message de réussite, puis redémarrer le dashboard pour charger le nouveau backend.</li>
+  </ol>
+  <div class="note">
+    Aucune boîte de dialogue n'est affichée. Avant remplacement, les fichiers actuels sont copiés dans
+    <code>dashboard-backups\AAAAmmjj-HHMMSS</code>. Seule la liste fermée des fichiers appartenant au dashboard
+    est remplacée ; les modules, configurations, volumes Docker et bases de données ne sont pas touchés.
   </div>
 </section>
 
