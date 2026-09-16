@@ -299,12 +299,14 @@ def catalogue_modules(force=False):
         full_name = entry.get("full_name", "")
         name = entry.get("name", "")
         branch = entry.get("default_branch", "")
+        catalogue_id = entry.get("id")
         topics = entry.get("topics", [])
         # Only conventional GitHub-hosted C++ modules are eligible. Tools, Lua and
         # SQL catalogue entries intentionally remain manual installs.
         if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name)
                 or not re.fullmatch(r"mod-[A-Za-z0-9_.-]+", name)
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch)
+                or not isinstance(catalogue_id, int) or isinstance(catalogue_id, bool)
                 or ".." in branch.split("/")
                 or "azerothcore-module" not in topics
                 or entry.get("archived") is True or entry.get("disabled") is True):
@@ -315,6 +317,7 @@ def catalogue_modules(force=False):
             "description": str(entry.get("description") or "")[:500],
             "branch": branch,
             "source": f"https://github.com/{full_name}",
+            "catalogue_url": f"{CATALOGUE_PAGE}details/{catalogue_id}",
             "stars": int(entry.get("stargazers_count") or 0),
         })
     modules.sort(key=lambda item: (-item["stars"], item["name"].casefold()))

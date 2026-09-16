@@ -178,7 +178,7 @@ class CatalogueModuleTests(unittest.TestCase):
 
     def test_catalogue_keeps_only_conventional_cpp_modules(self):
         entries = [
-            {"name": "mod-example", "full_name": "owner/mod-example", "default_branch": "main",
+            {"id": 12345, "name": "mod-example", "full_name": "owner/mod-example", "default_branch": "main",
              "topics": ["azerothcore-module"], "description": "Example", "stargazers_count": 4},
             {"name": "scripts", "full_name": "owner/scripts", "default_branch": "main",
              "topics": ["azerothcore-lua"], "stargazers_count": 99},
@@ -193,6 +193,8 @@ class CatalogueModuleTests(unittest.TestCase):
             modules = dashboard.catalogue_modules(force=True)
 
         self.assertEqual([item["full_name"] for item in modules], ["owner/mod-example"])
+        self.assertEqual(modules[0]["catalogue_url"],
+                         "https://www.azerothcore.org/catalogue.html#/details/12345")
         self.assertFalse(modules[0]["installed"])
 
     def test_install_is_atomic_and_requires_root_cmake(self):

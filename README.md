@@ -28,7 +28,7 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - placeholders visibles pour les futures fonctions prévues
 - indicateur automatique de mise à jour du dashboard, avec mise à jour confirmée en deux clics et sauvegarde locale
 - état de chaque module par comparaison avec le dépôt custom groupé ou avec son propre dépôt Git
-- recherche et installation confirmée des modules C++ conventionnels du catalogue officiel AzerothCore
+- recherche et installation confirmée des modules C++ conventionnels, avec liens directs vers leur fiche du catalogue officiel AzerothCore et leur dépôt GitHub
 
 ## Sécurité
 
