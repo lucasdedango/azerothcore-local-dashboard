@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,14 +18,48 @@ class DashboardUpdateTests(unittest.TestCase):
         self.project_patch.stop()
         self.temp.cleanup()
 
-    def test_status_compares_dashboard_and_grouped_modules_without_writing(self):
-        dashboard_remote = {name: f"remote-{name}".encode() for name in dashboard.DASHBOARD_FILES}
-        for name, content in dashboard_remote.items():
+    def archive(self, extra_entries=(), undeclared=None, version=1, omit=()):
+        entries = [
+            (dashboard.UPDATE_MANIFEST, "Manifeste de mise à jour."),
+            ("dashboard_server.py", "Backend local."),
+            ("dashboard.html", "Interface locale."),
+            *extra_entries,
+        ]
+        entries = [entry for entry in entries if entry[0] not in omit]
+        manifest = {
+            "version": version,
+            "files": [
+                {"path": path, "description": description, "update_policy": "replace"}
+                for path, description in entries
+            ],
+        }
+        remote = {path: f"new-{path}".encode() for path, _ in entries}
+        remote[dashboard.UPDATE_MANIFEST] = json.dumps(manifest).encode()
+        if undeclared:
+            remote.update(undeclared)
+        return remote
+
+    def write_old_required(self, remote):
+        for name in dashboard.REQUIRED_DASHBOARD_FILES:
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        (self.root / "dashboard.html").write_text("ancienne version", encoding="utf-8")
+            path.write_bytes(remote[name])
 
+    def test_status_detects_declared_new_file_as_missing(self):
+        remote = self.archive((("nouveau-script.ps1", "Nouvelle action bornée."),))
+        self.write_old_required(remote)
+
+        with mock.patch.object(dashboard, "github_archive", return_value=remote):
+            status = dashboard.dashboard_update_status()
+
+        self.assertFalse(status["up_to_date"])
+        self.assertEqual(status["changed_files"], ["nouveau-script.ps1"])
+        self.assertEqual(status["compared_files"], 4)
+
+    def test_status_compares_dashboard_and_grouped_modules_without_writing(self):
+        dashboard_remote = self.archive()
+        self.write_old_required(dashboard_remote)
+        (self.root / "dashboard.html").write_text("ancienne version", encoding="utf-8")
         module_file = self.root / "modules" / "mod-example" / "src" / "example.cpp"
         module_file.parent.mkdir(parents=True)
         module_file.write_bytes(b"same")
@@ -37,28 +72,79 @@ class DashboardUpdateTests(unittest.TestCase):
             status = dashboard.dashboard_update_status()
             modules = dashboard.module_update_statuses()
 
-        self.assertFalse(status["up_to_date"])
         self.assertEqual(status["changed_files"], ["dashboard.html"])
         self.assertTrue(modules[0]["up_to_date"])
         self.assertEqual(module_file.read_bytes(), b"same")
 
-    def test_install_creates_backup_and_replaces_only_allowlisted_files(self):
-        remote = {name: f"new-{name}".encode() for name in dashboard.DASHBOARD_FILES}
-        for name in dashboard.DASHBOARD_FILES:
+    def test_install_adds_new_file_and_ignores_undeclared_file(self):
+        remote = self.archive(
+            (("nouveau-script.ps1", "Nouvelle action bornée."),),
+            {"docker-compose.override.yml": b"must not install"},
+        )
+        for name in dashboard.REQUIRED_DASHBOARD_FILES:
             path = self.root / name
-            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(f"old-{name}".encode())
-        protected = self.root / "docker-compose.override.yml"
-        protected.write_text("must stay", encoding="utf-8")
 
         with mock.patch.object(dashboard, "github_archive", return_value=remote):
             result = dashboard.install_dashboard_update()
 
         self.assertTrue(result["ok"], result["output"])
-        self.assertEqual((self.root / "dashboard.html").read_bytes(), b"new-dashboard.html")
-        self.assertEqual(protected.read_text(encoding="utf-8"), "must stay")
+        self.assertEqual((self.root / "nouveau-script.ps1").read_bytes(), b"new-nouveau-script.ps1")
+        self.assertFalse((self.root / "docker-compose.override.yml").exists())
         backup = Path(result["backup"])
         self.assertEqual((backup / "dashboard.html").read_bytes(), b"old-dashboard.html")
+        self.assertFalse((backup / "nouveau-script.ps1").exists())
+
+    def test_unsafe_paths_are_refused(self):
+        unsafe = [
+            "../outside.txt", "C:/absolute.txt", "/absolute.txt",
+            "modules/mod-danger/file.txt", "dashboard-backups/old/file.txt",
+            "config-backups/config.txt",
+        ]
+        for name in unsafe:
+            with self.subTest(name=name):
+                remote = self.archive(((name, "Chemin dangereux."),))
+                with mock.patch.object(dashboard, "github_archive", return_value=remote):
+                    with self.assertRaises(RuntimeError):
+                        dashboard.dashboard_update_archive()
+
+    def test_declared_file_missing_from_archive_blocks_update(self):
+        remote = self.archive((("missing.ps1", "Fichier absent."),))
+        del remote["missing.ps1"]
+        with mock.patch.object(dashboard, "github_archive", return_value=remote):
+            result = dashboard.install_dashboard_update()
+        self.assertFalse(result["ok"])
+        self.assertFalse((self.root / "dashboard-backups").exists())
+
+    def test_rollback_removes_new_file_after_later_write_failure(self):
+        remote = self.archive((("new.txt", "Nouveau fichier."), ("last.txt", "Déclenche l'échec.")))
+        self.write_old_required(remote)
+        real_replace = dashboard.os.replace
+
+        def fail_on_last(source, destination):
+            if Path(destination).name == "last.txt":
+                raise OSError("simulated write failure")
+            return real_replace(source, destination)
+
+        with mock.patch.object(dashboard, "github_archive", return_value=remote), \
+                mock.patch.object(dashboard.os, "replace", side_effect=fail_on_last):
+            result = dashboard.install_dashboard_update()
+
+        self.assertFalse(result["ok"])
+        self.assertFalse((self.root / "new.txt").exists())
+        for name in dashboard.REQUIRED_DASHBOARD_FILES:
+            self.assertEqual((self.root / name).read_bytes(), remote[name])
+
+    def test_incomplete_or_unknown_manifest_changes_nothing(self):
+        original = b"local dashboard"
+        (self.root / "dashboard.html").write_bytes(original)
+        cases = [self.archive(version=99), self.archive(omit=("dashboard_server.py",))]
+        for remote in cases:
+            with self.subTest(remote=remote), mock.patch.object(dashboard, "github_archive", return_value=remote):
+                result = dashboard.install_dashboard_update()
+            self.assertFalse(result["ok"])
+            self.assertEqual((self.root / "dashboard.html").read_bytes(), original)
+            self.assertFalse((self.root / "dashboard-backups").exists())
 
 
 if __name__ == "__main__":

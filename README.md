@@ -37,17 +37,31 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - rebuild lancé via le `rebuild.bat` fourni
 - les actions interactives sont ouvertes dans une vraie console Windows
 - la vérification des versions ne modifie aucun module
-- l'auto-update ne remplace que les fichiers appartenant au dashboard et les sauvegarde dans `dashboard-backups`
+- l'auto-update ne remplace que les fichiers déclarés par son manifeste contrôlé et les sauvegarde dans `dashboard-backups`
 
 ## Fichiers
 
-- `dashboard.bat` : démarre l'interface
-- `dashboard_server.py` : backend local
-- `dashboard.html` : interface
-- `rebuild.bat` : script fourni
-- `rebuild-azerothcore.ps1` : helper fourni
-- `azerothcore-commandes-joueur.html` : cheat sheet fournie
-- `azerothcore-maintenance-guide.html` : guide fourni
+- `dashboard-update-manifest.json` : source de vérité des fichiers que l'auto-update est autorisé à comparer et installer
+- `dashboard.bat` : lance l'interface locale sous Windows
+- `dashboard_server.py` : fournit le backend HTTP local
+- `dashboard.html` : fournit l'interface web locale
+- `README.md` : documente l'installation et les fichiers du dashboard
+- `rebuild.bat` : point d'entrée Windows de la reconstruction
+- `rebuild-azerothcore.ps1` : réalise la reconstruction d'AzerothCore
+- `patch-and-rebuild.ps1` : applique les patchs Playerbots prévus puis lance la reconstruction
+- `azerothcore-maintenance-guide.html` : documente les workflows de maintenance
+
+`azerothcore-commandes-joueur.html` est une cheat sheet accessible depuis le dashboard, mais n'est pas actuellement gérée par l'auto-update. Un fichier présent dans Git mais absent de `dashboard-update-manifest.json` n'est volontairement ni comparé ni installé.
+
+## Ajouter un fichier géré par l'auto-update
+
+Chaque nouveau fichier géré doit :
+
+1. être ajouté au dépôt ;
+2. être déclaré dans `dashboard-update-manifest.json` avec la politique prise en charge `replace` ;
+3. avoir une `description` expliquant précisément son rôle ;
+4. être ajouté à la section « Fichiers » ci-dessus avec son chemin et son utilité ;
+5. être accompagné d'un test si son installation modifie le workflow du dashboard.
 
 - `-File`
 - `C:\azerothcore-playerbots\rebuild-azerothcore.ps1`

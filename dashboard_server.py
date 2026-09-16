@@ -7,7 +7,7 @@ import datetime as dt
 import json
 import mimetypes
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
 import subprocess
 import tempfile
@@ -27,16 +27,21 @@ ALLOWED_EDIT_SUFFIXES = {".conf", ".dist", ".yml", ".yaml", ".env", ".txt", ".js
 DASHBOARD_REPO = "lucasdedango/azerothcore-local-dashboard"
 MODULES_REPO = "lucasdedango/azerothcore-custom-modules"
 GITHUB_BRANCH = "main"
-DASHBOARD_FILES = (
-    "dashboard.bat",
+UPDATE_MANIFEST = "dashboard-update-manifest.json"
+REQUIRED_DASHBOARD_FILES = frozenset((
+    UPDATE_MANIFEST,
     "dashboard_server.py",
     "dashboard.html",
-    "README.md",
-    "rebuild.bat",
-    "rebuild-azerothcore.ps1",
-    "patch-and-rebuild.ps1",
-    "azerothcore-maintenance-guide.html",
-)
+))
+SUPPORTED_MANIFEST_VERSION = 1
+SUPPORTED_UPDATE_POLICIES = frozenset(("replace",))
+MAX_UPDATE_FILES = 100
+MAX_UPDATE_BYTES = 10 * 1024 * 1024
+MAX_MANIFEST_BYTES = 256 * 1024
+FORBIDDEN_UPDATE_ROOTS = frozenset((
+    "modules", "env", "config-backups", "dashboard-backups",
+    "docker", "docker-data", "data", "mysql-data",
+))
 UPDATE_CACHE_SECONDS = 300
 _archive_cache = {}
 _archive_cache_lock = threading.Lock()
@@ -92,6 +97,72 @@ def github_archive(repo, branch=GITHUB_BRANCH, force=False):
     return files
 
 
+def dashboard_update_archive(force=False):
+    """Download and validate the remote manifest, returning only its files."""
+    archive = github_archive(DASHBOARD_REPO, force=force)
+    raw_manifest = archive.get(UPDATE_MANIFEST)
+    if raw_manifest is None:
+        raise RuntimeError(f"Manifeste distant absent: {UPDATE_MANIFEST}")
+    if len(raw_manifest) > MAX_MANIFEST_BYTES:
+        raise RuntimeError("Manifeste distant trop volumineux.")
+    try:
+        manifest = json.loads(raw_manifest.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Manifeste distant JSON invalide: {e}") from e
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Le manifeste distant doit être un objet JSON.")
+    if manifest.get("version") != SUPPORTED_MANIFEST_VERSION:
+        raise RuntimeError(f"Version de manifeste non supportée: {manifest.get('version')!r}")
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("Le manifeste distant ne contient aucune liste de fichiers valide.")
+    if len(entries) > MAX_UPDATE_FILES:
+        raise RuntimeError(f"Le manifeste dépasse la limite de {MAX_UPDATE_FILES} fichiers.")
+
+    selected = {}
+    normalized_paths = set()
+    total_size = 0
+    root = PROJECT_ROOT.resolve()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError("Chaque entrée du manifeste doit être un objet.")
+        name = entry.get("path")
+        description = entry.get("description")
+        policy = entry.get("update_policy")
+        if not isinstance(name, str) or not name.strip() or name != name.strip():
+            raise RuntimeError("Chaque chemin du manifeste doit être une chaîne relative non vide.")
+        windows_path = PureWindowsPath(name)
+        if "\\" in name or PurePosixPath(name).is_absolute() or windows_path.is_absolute() or windows_path.drive:
+            raise RuntimeError(f"Chemin absolu ou non portable refusé: {name}")
+        parts = PurePosixPath(name).parts
+        if ".." in parts or "." in parts or not parts:
+            raise RuntimeError(f"Chemin non sûr refusé: {name}")
+        if parts[0].casefold() in FORBIDDEN_UPDATE_ROOTS:
+            raise RuntimeError(f"Répertoire protégé refusé dans le manifeste: {name}")
+        destination = (root / Path(*parts)).resolve()
+        if destination == root or root not in destination.parents:
+            raise RuntimeError(f"Chemin hors du projet refusé: {name}")
+        normalized = PurePosixPath(*parts).as_posix().casefold()
+        if normalized in normalized_paths:
+            raise RuntimeError(f"Chemin dupliqué dans le manifeste: {name}")
+        if not isinstance(description, str) or not description.strip():
+            raise RuntimeError(f"Description manquante pour: {name}")
+        if policy not in SUPPORTED_UPDATE_POLICIES:
+            raise RuntimeError(f"Politique de mise à jour non supportée pour {name}: {policy!r}")
+        if name not in archive:
+            raise RuntimeError(f"Fichier déclaré absent de l'archive distante: {name}")
+        total_size += len(archive[name])
+        if total_size > MAX_UPDATE_BYTES:
+            raise RuntimeError("Les fichiers déclarés dépassent la limite totale de 10 Mo.")
+        normalized_paths.add(normalized)
+        selected[name] = archive[name]
+
+    missing_required = sorted(REQUIRED_DASHBOARD_FILES - selected.keys())
+    if missing_required:
+        raise RuntimeError("Manifeste distant incomplet, fichiers indispensables absents: " + ", ".join(missing_required))
+    return selected
+
+
 def _same_file(path, expected):
     try:
         return path.is_file() and path.read_bytes() == expected
@@ -145,14 +216,13 @@ def _git_module_status(module_path):
 
 
 def dashboard_update_status():
-    remote = github_archive(DASHBOARD_REPO)
-    compared = [name for name in DASHBOARD_FILES if name in remote]
-    changed = [name for name in compared if not _same_file(PROJECT_ROOT / name, remote[name])]
+    remote = dashboard_update_archive()
+    changed = [name for name, content in remote.items() if not _same_file(PROJECT_ROOT / name, content)]
     return {
         "ok": True,
-        "up_to_date": not changed and bool(compared),
+        "up_to_date": not changed,
         "changed_files": changed,
-        "compared_files": len(compared),
+        "compared_files": len(remote),
         "repository": f"https://github.com/{DASHBOARD_REPO}",
     }
 
@@ -200,35 +270,37 @@ def install_dashboard_update():
     if not _dashboard_update_lock.acquire(blocking=False):
         return {"ok": False, "code": -1, "output": "Une mise à jour est déjà en cours."}
     try:
-        remote = github_archive(DASHBOARD_REPO, force=True)
-        missing = [name for name in DASHBOARD_FILES if name not in remote]
-        if missing:
-            raise RuntimeError("Fichiers absents de la version distante: " + ", ".join(missing))
+        remote = dashboard_update_archive(force=True)
 
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         backup = PROJECT_ROOT / "dashboard-backups" / stamp
         stage = Path(tempfile.mkdtemp(prefix="ac-dashboard-update-"))
         replaced = []
+        existed = {}
         try:
-            for name in DASHBOARD_FILES:
+            for name, content in remote.items():
                 staged = stage / name
                 staged.parent.mkdir(parents=True, exist_ok=True)
-                staged.write_bytes(remote[name])
+                staged.write_bytes(content)
             backup.mkdir(parents=True, exist_ok=False)
-            for name in DASHBOARD_FILES:
+            existed = {name: (PROJECT_ROOT / name).is_file() for name in remote}
+            for name in remote:
                 destination = PROJECT_ROOT / name
                 saved = backup / name
-                if destination.exists():
+                if existed[name]:
                     saved.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(destination, saved)
-                os.replace(stage / name, destination)
+                destination.parent.mkdir(parents=True, exist_ok=True)
                 replaced.append(name)
+                os.replace(stage / name, destination)
         except Exception:
-            for name in replaced:
+            for name in reversed(replaced):
                 saved = backup / name
                 destination = PROJECT_ROOT / name
-                if saved.exists():
+                if existed.get(name) and saved.is_file():
                     shutil.copy2(saved, destination)
+                elif not existed.get(name):
+                    destination.unlink(missing_ok=True)
             raise
         finally:
             shutil.rmtree(stage, ignore_errors=True)
