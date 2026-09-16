@@ -26,6 +26,8 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - lecture/écriture des configs actives du conteneur worldserver avec `docker cp`
 - backup automatique d'une config avant chaque sauvegarde depuis l'interface
 - placeholders visibles pour les futures fonctions prévues
+- indicateur automatique de mise à jour du dashboard, avec mise à jour confirmée en deux clics et sauvegarde locale
+- état de chaque module par comparaison avec le dépôt custom groupé ou avec son propre dépôt Git
 
 ## Sécurité
 
@@ -34,6 +36,8 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - aucun bouton `docker compose down -v`
 - rebuild lancé via le `rebuild.bat` fourni
 - les actions interactives sont ouvertes dans une vraie console Windows
+- la vérification des versions ne modifie aucun module
+- l'auto-update ne remplace que les fichiers appartenant au dashboard et les sauvegarde dans `dashboard-backups`
 
 ## Fichiers
 
