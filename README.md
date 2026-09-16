@@ -41,7 +41,7 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - l'installateur refuse les URL libres : il clone uniquement un dépôt encore présent dans la catégorie `azerothcore-module`, avec un nom `mod-*`, puis accepte la structure actuelle (`src` contenant du C++) ou l'ancienne structure avec un `CMakeLists.txt` racine
 - l'installation est atomique, n'exécute aucun code du module et ne lance automatiquement ni SQL ni rebuild
 - la mise à jour prépare et vérifie la nouvelle version avant remplacement, conserve une sauvegarde complète dans `module-backups` et ne lance automatiquement ni SQL, ni modification de config, ni rebuild
-- la suppression exige de saisir exactement le nom du module ; les configs actives sont sauvegardées avant suppression et le nettoyage SQL, désactivé par défaut, est limité aux scripts de désinstallation explicites attribuables à une base
+- la suppression exige de saisir exactement le nom du module ; les configs actives `.conf` et `.conf.dist` sont sauvegardées avant suppression, les fichiers Git en lecture seule sont gérés sous Windows, et l'assistant SQL laisse tout décoché par défaut, distingue les scripts officiels des propositions bornées déduites, puis sauvegarde les tables avant d'exécuter une proposition déduite
 - l'auto-update permet de choisir une branche GitHub publiée, ne remplace que les fichiers déclarés par son manifeste contrôlé et les sauvegarde dans `dashboard-backups`
 - le retour à `main` supprime uniquement les fichiers suivis qui avaient été ajoutés par la branche de test, après les avoir sauvegardés ; les fichiers non déclarés restent intacts
 

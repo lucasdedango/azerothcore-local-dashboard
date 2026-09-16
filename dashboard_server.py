@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 import datetime as dt
+import hashlib
 import json
 import mimetypes
 import os
@@ -41,6 +42,7 @@ MAX_UPDATE_FILES = 100
 MAX_UPDATE_BYTES = 10 * 1024 * 1024
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_BRANCHES = 100
+MAX_MODULE_SQL_BYTES = 1024 * 1024
 FORBIDDEN_UPDATE_ROOTS = frozenset((
     "modules", "env", "config-backups", "dashboard-backups", "module-backups",
     "docker", "docker-data", "data", "mysql-data",
@@ -74,7 +76,7 @@ def run(cmd, timeout=45, shell=False):
 
 
 def _remove_temporary_tree(path):
-    """Remove a staging tree, including read-only Git files on Windows."""
+    """Remove a tree, including read-only Git files on Windows."""
     path = Path(path)
     if not path.exists():
         return None
@@ -87,7 +89,7 @@ def _remove_temporary_tree(path):
         shutil.rmtree(path, onerror=make_writable_and_retry)
         return None
     except OSError as e:
-        return f"Nettoyage du dossier temporaire impossible ({path.name}): {e}"
+        return f"Suppression complète du dossier impossible ({path}): {e}"
 
 
 def _validate_cpp_module_tree(module_path):
@@ -530,6 +532,86 @@ def _validated_local_module(name):
     return candidate
 
 
+def _sql_database_from_path(path, sql_root):
+    parts = {part.casefold() for part in path.relative_to(sql_root).parts[:-1]}
+    databases = [
+        db for db in ("world", "characters", "auth")
+        if any(part in (db, f"db-{db}", f"db_{db}") for part in parts)
+    ]
+    return f"acore_{databases[0]}" if len(databases) == 1 else None
+
+
+def _sql_proposal_id(source, database, sql, source_content):
+    source_digest = hashlib.sha256(source_content.encode("utf-8")).hexdigest()
+    material = f"{source}\0{database}\0{sql}\0{source_digest}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()[:24]
+
+
+def _infer_sql_cleanup(source, database, content):
+    """Infer only tightly bounded cleanup statements from one install script."""
+    proposals = []
+    variables = {
+        name.casefold(): int(value)
+        for name, value in re.findall(r"(?im)^\s*SET\s+@([A-Za-z0-9_]+)\s*:?=\s*(\d+)\s*;", content)
+    }
+
+    # A created table is owned by the module with reasonable confidence, but
+    # dropping it destroys all rows and must remain an explicit high-risk choice.
+    for match in re.finditer(
+            r"(?is)\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?\s*\(", content):
+        table = match.group(1)
+        sql = f"DROP TABLE IF EXISTS `{table}`;"
+        proposals.append({
+            "id": _sql_proposal_id(source, database, sql, content),
+            "source": source,
+            "database": database,
+            "sql": sql,
+            "tables": [table],
+            "risk": "high",
+            "destructive": True,
+            "title": f"Supprimer la table {table}",
+            "explanation": "Le script crée cette table. Sa suppression effacera définitivement toutes ses lignes.",
+        })
+
+    # Reuse only DELETE statements whose predicate is demonstrably bounded to
+    # literal keys or a numeric range. Never infer an unbounded DELETE.
+    delete_pattern = re.compile(
+        r"(?is)\bDELETE\s+FROM\s+`?([A-Za-z0-9_]+)`?\s+WHERE\s+(.+?)\s*;"
+    )
+    for match in delete_pattern.finditer(content):
+        table, predicate = match.group(1), match.group(2).strip()
+        if not re.search(rf"(?is)\bINSERT\s+INTO\s+`?{re.escape(table)}`?\b", content[match.end():]):
+            continue
+        bounded = bool(re.fullmatch(
+            r"`?[A-Za-z0-9_]+`?\s+IN\s*\(\s*(?:'(?:[^'\\]|\\.)*'|\d+)"
+            r"(?:\s*,\s*(?:'(?:[^'\\]|\\.)*'|\d+))*\s*\)", predicate, re.I | re.S
+        ))
+        set_prefix = ""
+        between = re.fullmatch(
+            r"`?[A-Za-z0-9_]+`?\s+BETWEEN\s+@([A-Za-z0-9_]+)(?:\s*\+\s*\d+)?"
+            r"\s+AND\s+@\1(?:\s*\+\s*\d+)?", predicate, re.I | re.S
+        )
+        if between and between.group(1).casefold() in variables:
+            variable = between.group(1)
+            set_prefix = f"SET @{variable}:={variables[variable.casefold()]};\n"
+            bounded = True
+        if not bounded:
+            continue
+        sql = f"{set_prefix}DELETE FROM `{table}` WHERE {predicate};"
+        proposals.append({
+            "id": _sql_proposal_id(source, database, sql, content),
+            "source": source,
+            "database": database,
+            "sql": sql,
+            "tables": [table],
+            "risk": "medium",
+            "destructive": True,
+            "title": f"Supprimer les lignes de {table} attribuées au module",
+            "explanation": "Le script d'installation supprime cette même sélection avant de la réinsérer. Vérifiez que ces clés ne sont pas partagées.",
+        })
+    return proposals
+
+
 def module_removal_plan(name):
     """Describe removable artifacts without changing the module or a database."""
     module = _validated_local_module(name)
@@ -537,8 +619,12 @@ def module_removal_plan(name):
     conf_dir = module / "conf"
     if conf_dir.is_dir():
         for path in conf_dir.iterdir():
-            if path.is_file() and (path.name.endswith(".conf") or path.name.endswith(".conf.dist")):
-                config_names.add(path.name.removesuffix(".dist"))
+            if path.is_file() and path.name.endswith(".conf.dist"):
+                # A module source generally ships foo.conf.dist while the active
+                # container can contain both foo.conf and foo.conf.dist.
+                config_names.update((path.name.removesuffix(".dist"), path.name))
+            elif path.is_file() and path.name.endswith(".conf"):
+                config_names.update((path.name, path.name + ".dist"))
 
     active = []
     try:
@@ -550,24 +636,50 @@ def module_removal_plan(name):
         active = []
 
     sql = []
-    sql_root = module / "sql"
-    if sql_root.is_dir():
+    discovered_sql = []
+    inferred_sql = []
+    # AzerothCore modules can use either the legacy sql/ tree or the current
+    # data/sql/ layout. Only an explicitly named uninstall script is safe to
+    # execute: installation scripts often contain DELETE statements used to
+    # make an INSERT idempotent, which does not make them uninstall scripts.
+    for sql_root in (module / "sql", module / "data" / "sql"):
+        if not sql_root.is_dir():
+            continue
         for path in sql_root.rglob("*.sql"):
             relative = path.relative_to(module).as_posix()
+            discovered_sql.append(relative)
+            database = _sql_database_from_path(path, sql_root)
             lowered = path.name.casefold()
             if any(word in lowered for word in ("uninstall", "remove", "delete", "drop")):
-                parts = {part.casefold() for part in path.relative_to(sql_root).parts[:-1]}
-                databases = [
-                    db for db in ("world", "characters", "auth")
-                    if any(part in (db, f"db-{db}", f"db_{db}") for part in parts)
-                ]
-                if len(databases) == 1:
-                    sql.append({"path": relative, "database": f"acore_{databases[0]}"})
+                if database:
+                    preview = (path.read_text(encoding="utf-8", errors="replace")
+                               if path.stat().st_size <= MAX_MODULE_SQL_BYTES
+                               else "-- Script trop volumineux pour être prévisualisé dans le dashboard.")
+                    sql.append({"path": relative, "database": database, "content": preview})
+                continue
+            if database and path.stat().st_size <= MAX_MODULE_SQL_BYTES:
+                content = path.read_text(encoding="utf-8", errors="replace")
+                inferred_sql.extend(_infer_sql_cleanup(relative, database, content))
+    sql_notice = ""
+    if discovered_sql and not sql and inferred_sql:
+        sql_notice = (
+            f"{len(discovered_sql)} script(s) SQL d'installation ou de mise à jour détecté(s). "
+            f"L'assistant a préparé {len(inferred_sql)} proposition(s) de nettoyage à vérifier; "
+            "elles ne proviennent pas d'un script de désinstallation officiel."
+        )
+    elif discovered_sql and not sql:
+        sql_notice = (
+            f"{len(discovered_sql)} script(s) SQL d'installation ou de mise à jour détecté(s), "
+            "mais aucun script de désinstallation explicite et attribuable à une base. "
+            "Aucun nettoyage suffisamment borné n'a pu être déduit."
+        )
     return {
         "name": name,
         "folder": f"modules/{name}",
         "configs": active,
         "sql": sorted(sql, key=lambda item: item["path"]),
+        "inferred_sql": sorted(inferred_sql, key=lambda item: (item["database"], item["source"], item["title"])),
+        "sql_notice": sql_notice,
     }
 
 
@@ -585,7 +697,41 @@ def _execute_module_uninstall_sql(module, scripts):
             raise RuntimeError(f"Échec du script {item['path']}; le dossier du module a été conservé.\n\n{output}")
 
 
-def remove_local_module(name, remove_configs=False, remove_sql=False, confirmation=""):
+def _backup_inferred_sql_tables(name, proposals):
+    if not docker_available() or not container_running("ac-database"):
+        raise RuntimeError("La base ac-database doit être démarrée pour sauvegarder puis nettoyer le SQL du module.")
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_dir = PROJECT_ROOT / "db-backups" / "module-removal" / stamp / name
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    for database, table in sorted({(p["database"], table) for p in proposals for table in p["tables"]}):
+        command = ["docker", "exec", "ac-database", "mysqldump", "-uroot", "-ppassword",
+                   "--single-transaction", "--skip-lock-tables", database, table]
+        proc = subprocess.run(command, cwd=PROJECT_ROOT, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=120)
+        if proc.returncode:
+            error = proc.stderr.decode("utf-8", "replace")
+            raise RuntimeError(f"Sauvegarde de {database}.{table} impossible; aucun SQL déduit n'a été exécuté.\n\n{error}")
+        (backup_dir / f"{database}--{table}.sql").write_bytes(proc.stdout)
+    return backup_dir
+
+
+def _execute_inferred_sql(name, proposals, backup=None):
+    backup = backup or _backup_inferred_sql_tables(name, proposals)
+    for item in proposals:
+        command = ["docker", "exec", "-i", "ac-database", "mysql", "-uroot", "-ppassword", item["database"]]
+        proc = subprocess.run(command, cwd=PROJECT_ROOT, input=item["sql"].encode("utf-8"),
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+        if proc.returncode:
+            output = proc.stdout.decode("utf-8", "replace")
+            raise RuntimeError(
+                f"Échec du nettoyage déduit « {item['title']} ». Le dossier du module est conservé. "
+                f"Sauvegarde disponible dans {backup}.\n\n{output}"
+            )
+    return backup
+
+
+def remove_local_module(name, remove_configs=False, remove_sql=False, inferred_sql_ids=None,
+                        sql_confirmation="", confirmation=""):
     """Remove one module after an exact-name confirmation and optional cleanup."""
     if confirmation != name:
         return {"ok": False, "code": -1, "output": "Confirmation invalide: saisissez exactement le nom du module."}
@@ -594,10 +740,25 @@ def remove_local_module(name, remove_configs=False, remove_sql=False, confirmati
     try:
         module = _validated_local_module(name)
         plan = module_removal_plan(name)
+        inferred_sql_ids = inferred_sql_ids if isinstance(inferred_sql_ids, list) else []
+        if not all(isinstance(item, str) for item in inferred_sql_ids):
+            raise RuntimeError("Sélection SQL déduite invalide.")
+        available_inferred = {item["id"]: item for item in plan["inferred_sql"]}
+        if len(set(inferred_sql_ids)) != len(inferred_sql_ids) or any(
+                item not in available_inferred for item in inferred_sql_ids):
+            raise RuntimeError("Le plan SQL a changé ou contient une sélection inconnue; relancez l'analyse.")
+        selected_inferred = [available_inferred[item] for item in inferred_sql_ids]
+        if selected_inferred and sql_confirmation != f"SUPPRIMER SQL {name}":
+            raise RuntimeError("Confirmation SQL invalide; aucun nettoyage SQL déduit n'a été exécuté.")
+        # Complete every inferred-table dump before any selected SQL (including
+        # an official uninstall script) is allowed to modify the database.
+        inferred_backup = _backup_inferred_sql_tables(name, selected_inferred) if selected_inferred else None
         if remove_sql:
             if not plan["sql"]:
                 raise RuntimeError("Aucun script SQL de désinstallation explicite et attribuable à une base n'a été trouvé.")
             _execute_module_uninstall_sql(module, plan["sql"])
+        if selected_inferred:
+            _execute_inferred_sql(name, selected_inferred, backup=inferred_backup)
 
         removed_configs = []
         if remove_configs:
@@ -609,12 +770,19 @@ def remove_local_module(name, remove_configs=False, remove_sql=False, confirmati
                     raise RuntimeError(f"Suppression de {config_name} impossible; le dossier du module a été conservé.\n\n{result['output']}")
                 removed_configs.append(config_name)
 
-        shutil.rmtree(module)
+        removal_error = _remove_temporary_tree(module)
+        if removal_error:
+            raise RuntimeError(
+                removal_error + " Les éventuelles configurations actives sélectionnées ont déjà été "
+                "sauvegardées avant leur suppression."
+            )
         details = [f"dossier {plan['folder']}"]
         if removed_configs:
             details.append("config(s) active(s) sauvegardée(s) puis supprimée(s): " + ", ".join(removed_configs))
         if remove_sql:
             details.append("script(s) SQL exécuté(s): " + ", ".join(item["path"] for item in plan["sql"]))
+        if selected_inferred:
+            details.append(f"{len(selected_inferred)} nettoyage(s) SQL déduit(s) exécuté(s), sauvegarde: {inferred_backup}")
         return {"ok": True, "code": 0, "output": f"{name} supprimé ({'; '.join(details)}). Lancez un Rebuild AzerothCore.", "removed": plan}
     except Exception as e:
         return {"ok": False, "code": -1, "output": str(e)}
@@ -773,8 +941,9 @@ def list_active_configs():
         if not r["ok"]:
             return []
         items = []
-        for p in sorted(dest.glob("*.conf")):
-            items.append({"source": "container", "path": p.name, "label": f"ACTIVE: {p.name}"})
+        for p in sorted(dest.iterdir()):
+            if p.is_file() and (p.name.endswith(".conf") or p.name.endswith(".conf.dist")):
+                items.append({"source": "container", "path": p.name, "label": f"ACTIVE: {p.name}"})
         return items
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1214,6 +1383,8 @@ class Handler(BaseHTTPRequestHandler):
                 name,
                 remove_configs=data.get("remove_configs") is True,
                 remove_sql=data.get("remove_sql") is True,
+                inferred_sql_ids=data.get("inferred_sql_ids"),
+                sql_confirmation=str(data.get("sql_confirmation", "")),
                 confirmation=str(data.get("confirmation", "")),
             )
             return self.send_json(result, 200 if result["ok"] else 400)
