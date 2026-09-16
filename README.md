@@ -42,7 +42,8 @@ Le dashboard utilise le lanceur Windows `py` (comme tes autres scripts Python) e
 - l'installation est atomique, n'exécute aucun code du module et ne lance automatiquement ni SQL ni rebuild
 - la mise à jour prépare et vérifie la nouvelle version avant remplacement, conserve une sauvegarde complète dans `module-backups` et ne lance automatiquement ni SQL, ni modification de config, ni rebuild
 - la suppression exige de saisir exactement le nom du module ; les configs actives sont sauvegardées avant suppression et le nettoyage SQL, désactivé par défaut, est limité aux scripts de désinstallation explicites attribuables à une base
-- l'auto-update ne remplace que les fichiers déclarés par son manifeste contrôlé et les sauvegarde dans `dashboard-backups`
+- l'auto-update permet de choisir une branche GitHub publiée, ne remplace que les fichiers déclarés par son manifeste contrôlé et les sauvegarde dans `dashboard-backups`
+- le retour à `main` supprime uniquement les fichiers suivis qui avaient été ajoutés par la branche de test, après les avoir sauvegardés ; les fichiers non déclarés restent intacts
 
 ## Fichiers
 

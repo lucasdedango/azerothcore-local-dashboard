@@ -378,19 +378,27 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
 
 <section id="updatedashboard">
   <h2>Mettre à jour le dashboard</h2>
-  <p>L'indicateur en haut à droite charge le manifeste contrôlé <code>dashboard-update-manifest.json</code>
-    depuis la branche <code>main</code> du dépôt officiel, puis compare uniquement les fichiers qu'il déclare.</p>
+  <p>L'indicateur en haut à droite liste les branches publiées du dépôt officiel. La branche choisie est comparée
+    à l'installation locale uniquement au moyen de son manifeste contrôlé <code>dashboard-update-manifest.json</code>.</p>
   <ol>
-    <li>Cliquer sur <strong>Mettre à jour</strong>.</li>
+    <li>Choisir <code>main</code> ou une branche de test dans le menu déroulant.</li>
+    <li>Cliquer sur <strong>Mettre à jour</strong> (ou <strong>Revenir à main</strong>).</li>
+    <li>Valider la boîte de dialogue qui rappelle la branche et l'effet du retour à <code>main</code>.</li>
     <li>Cliquer une seconde fois sur <strong>Confirmer la mise à jour</strong> dans les huit secondes.</li>
     <li>Attendre le message de réussite, puis redémarrer le dashboard pour charger le nouveau backend.</li>
   </ol>
   <div class="note">
-    Aucune boîte de dialogue n'est affichée. Avant remplacement, les fichiers actuels sont copiés dans
-    <code>dashboard-backups\AAAAmmjj-HHMMSS</code>. Le manifeste distant est validé avant toute écriture.
+    Avant remplacement ou suppression, les fichiers actuels sont copiés dans
+    <code>dashboard-backups\AAAAmmjj-HHMMSS-microsecondes</code>. Le manifeste distant et le nom de branche sont validés avant toute écriture.
     L'auto-update ne synchronise jamais automatiquement l'intégralité du dépôt, ni le dossier AzerothCore :
     seuls les fichiers déclarés sont remplacés ; les modules, configurations, volumes Docker et bases de données
     ne sont pas touchés.
+  </div>
+  <div class="warn">
+    Pour quitter une branche de test, sélectionner <code>main (principale)</code>. Le retour remplace les fichiers
+    gérés par leurs versions principales et supprime les fichiers qui avaient été ajoutés au manifeste de la branche
+    de test mais n'existent plus dans celui de <code>main</code>. Ces fichiers supprimés restent récupérables dans la
+    sauvegarde horodatée. Les fichiers non déclarés par les manifestes ne sont jamais supprimés.
   </div>
   <div class="warn">
     Si le catalogue de modules affiche qu'une page HTML n'est pas du JSON, le navigateur utilise une interface
