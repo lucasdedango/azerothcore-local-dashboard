@@ -365,6 +365,12 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
     seuls les fichiers déclarés sont remplacés ; les modules, configurations, volumes Docker et bases de données
     ne sont pas touchés.
   </div>
+  <div class="warn">
+    Si le catalogue de modules affiche qu'une page HTML n'est pas du JSON, le navigateur utilise une interface
+    plus récente que le backend Python encore en mémoire. Fermer la console du dashboard, relancer
+    <code>dashboard.bat</code>, puis actualiser le catalogue. Un simple rechargement du navigateur ne redémarre pas
+    le backend.
+  </div>
 </section>
 
 <section id="updatecore">
