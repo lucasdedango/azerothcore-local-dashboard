@@ -22,6 +22,12 @@ class DashboardHtmlTests(unittest.TestCase):
         self.assertIn("Redémarrage requis", html)
         self.assertNotIn("setTimeout(()=>location.reload(),1500)", html)
 
+    def test_module_install_error_is_shown_next_to_the_module(self):
+        html = Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
+
+        self.assertIn("showModuleInstallError(button,e.message)", html)
+        self.assertIn("role','alert", html)
+
 
 class DashboardUpdateTests(unittest.TestCase):
     def setUp(self):
@@ -247,6 +253,19 @@ class CatalogueModuleTests(unittest.TestCase):
         self.assertFalse(existing["ok"])
         self.assertIn("existe déjà", existing["output"])
         self.assertFalse(unknown["ok"])
+
+    def test_failed_clone_reports_git_error_and_removes_staging_folder(self):
+        module = {"name": "mod-example", "full_name": "owner/mod-example", "branch": "main",
+                  "source": "https://github.com/owner/mod-example", "description": "", "stars": 1,
+                  "installed": False}
+        with mock.patch.object(dashboard, "catalogue_modules", return_value=[module]), \
+                mock.patch.object(dashboard, "run", return_value={"ok": False, "code": 128,
+                                                                   "output": "fatal: network unavailable"}):
+            result = dashboard.install_catalogue_module("owner/mod-example")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("fatal: network unavailable", result["output"])
+        self.assertFalse(list((self.root / "modules").glob(".dashboard-install-*")))
 
 
 class RemoveModuleTests(unittest.TestCase):

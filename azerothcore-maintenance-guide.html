@@ -311,6 +311,9 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
     dont le nom commence par <code>mod-</code>. Il clone le dépôt dans <code>modules</code>, vérifie la présence
     d'un <code>CMakeLists.txt</code> à la racine et publie le dossier en une seule opération. Il n'exécute aucun
     script du module, n'applique aucun SQL et ne lance pas automatiquement le rebuild.
+    En cas d'échec, le détail renvoyé par Git est affiché directement sous le module. Le dossier temporaire
+    <code>.dashboard-install-*</code> est supprimé automatiquement, y compris lorsque Git a créé des fichiers
+    en lecture seule sous Windows. Si Windows empêche malgré tout son nettoyage, le dashboard l'indique explicitement.
   </div>
   <ol>
     <li>Lire le README du module et vérifier sa compatibilité avec la version du core.</li>
