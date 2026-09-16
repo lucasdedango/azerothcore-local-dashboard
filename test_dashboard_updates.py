@@ -7,6 +7,22 @@ from unittest import mock
 import dashboard_server as dashboard
 
 
+class DashboardHtmlTests(unittest.TestCase):
+    def test_api_reports_html_responses_and_stale_backend(self):
+        html = Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
+
+        self.assertIn("const r=await fetch(url,opt),text=await r.text()", html)
+        self.assertIn("r.status===404", html)
+        self.assertIn("relancez dashboard.bat", html)
+        self.assertNotIn("return await r.json()", html)
+
+    def test_dashboard_update_requires_backend_restart(self):
+        html = Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
+
+        self.assertIn("Redémarrage requis", html)
+        self.assertNotIn("setTimeout(()=>location.reload(),1500)", html)
+
+
 class DashboardUpdateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

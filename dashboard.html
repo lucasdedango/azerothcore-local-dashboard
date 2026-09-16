@@ -171,7 +171,14 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='logs') refreshLogs(100);
   if(b.dataset.tab==='modules'){refreshUpdates();loadCatalogue()}
 });
-async function api(url,opt){const r=await fetch(url,opt);return await r.json()}
+async function api(url,opt){
+  const r=await fetch(url,opt),text=await r.text(),type=(r.headers.get('content-type')||'').toLowerCase();
+  try{return JSON.parse(text)}catch(e){
+    const hint=r.status===404?' Le backend actif est probablement plus ancien que cette interface : fermez sa console, puis relancez dashboard.bat.':'';
+    const kind=type.includes('text/html')?'une page HTML':'une réponse non JSON';
+    throw new Error(`API ${url} : HTTP ${r.status}, le serveur a renvoyé ${kind}.${hint}`)
+  }
+}
 function show(o){$('#output').textContent=o.output??JSON.stringify(o,null,2)}
 async function act(name){$('#output').textContent='Exécution…';const o=await api('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});show(o);setTimeout(refreshStatus,700)}
 async function refreshStatus(){const s=await api('/api/status');const names=['ac-database','ac-authserver','ac-worldserver'];$('#services').innerHTML=`<div class="statusrow"><span>Docker Engine</span><span><i class="dot ${s.docker?'ok':'bad'}"></i>${s.docker?'OK':'OFF'}</span></div>`+names.map(n=>{const x=s.services[n];return `<div class="statusrow"><span>${n}</span><span><i class="dot ${x.running?'ok':'bad'}"></i>${x.running?'RUNNING':(x.exists?'STOPPED':'ABSENT')}</span></div>`}).join('')}
@@ -192,7 +199,7 @@ async function requestDashboardUpdate(){
   const button=$('#dashboardUpdateButton'),now=Date.now();
   if(now>updateArmedUntil){updateArmedUntil=now+8000;button.textContent='Confirmer la mise à jour';button.classList.add('warn');setTimeout(()=>{if(Date.now()>updateArmedUntil){button.textContent='Mettre à jour';button.classList.remove('warn')}},8100);return}
   updateArmedUntil=0;button.disabled=true;button.textContent='Mise à jour…';
-  try{const o=await api('/api/dashboard/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');$('#dashboardUpdateState').innerHTML='<i class="dot ok"></i>Mise à jour installée';$('#dashboardUpdateState').title=o.output;button.textContent='Rechargement…';setTimeout(()=>location.reload(),1500)}catch(e){button.disabled=false;button.textContent='Réessayer';button.classList.remove('warn');$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Mise à jour échouée';$('#dashboardUpdateState').title=e.message}
+  try{const o=await api('/api/dashboard/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');$('#dashboardUpdateState').innerHTML='<i class="dot ok"></i>Redémarrage requis';$('#dashboardUpdateState').title=o.output+' Fermez la console du dashboard puis relancez dashboard.bat pour charger le nouveau backend.';button.textContent='Relancer dashboard.bat';button.disabled=true;button.classList.remove('warn')}catch(e){button.disabled=false;button.textContent='Réessayer';button.classList.remove('warn');$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Mise à jour échouée';$('#dashboardUpdateState').title=e.message}
 }
 let catalogue=[],catalogueLoaded=false;
 async function loadCatalogue(force=false){
