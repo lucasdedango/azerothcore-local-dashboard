@@ -300,7 +300,27 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
 </section>
 
 <section id="modules">
-  <h2>Mettre à jour / remplacer un module</h2>
+  <h2>Installer / mettre à jour un module</h2>
+
+  <h3>Installation assistée depuis le catalogue</h3>
+  <p>Dans <strong>Modules &amp; dossiers → Installer depuis le catalogue</strong>, rechercher le module, ouvrir
+    <strong>Détails</strong> pour lire son README et ses prérequis, puis cliquer sur <strong>Installer</strong> et confirmer.</p>
+  <div class="note">
+    Le dashboard accepte uniquement les dépôts GitHub de la catégorie officielle <code>azerothcore-module</code>
+    dont le nom commence par <code>mod-</code>. Il clone le dépôt dans <code>modules</code>, vérifie la présence
+    d'un <code>CMakeLists.txt</code> à la racine et publie le dossier en une seule opération. Il n'exécute aucun
+    script du module, n'applique aucun SQL et ne lance pas automatiquement le rebuild.
+  </div>
+  <ol>
+    <li>Lire le README du module et vérifier sa compatibilité avec la version du core.</li>
+    <li>Installer le module depuis le dashboard.</li>
+    <li>Examiner les éventuelles étapes de configuration ou migrations SQL documentées par son auteur.</li>
+    <li>Lancer <strong>Rebuild AzerothCore</strong>, puis contrôler les logs.</li>
+  </ol>
+  <div class="danger">
+    La présence dans le catalogue n'est pas un audit de sécurité. Ne lance pas un script ou un SQL tiers sans
+    l'avoir examiné et sans sauvegarde adaptée. Le dashboard refuse aussi de remplacer un dossier de module existant.
+  </div>
 
   <div class="note">
     L'onglet <strong>Modules &amp; dossiers</strong> du dashboard vérifie automatiquement l'état de chaque module.

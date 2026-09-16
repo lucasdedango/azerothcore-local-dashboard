@@ -147,5 +147,69 @@ class DashboardUpdateTests(unittest.TestCase):
             self.assertFalse((self.root / "dashboard-backups").exists())
 
 
+class CatalogueModuleTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.project_patch = mock.patch.object(dashboard, "PROJECT_ROOT", self.root)
+        self.project_patch.start()
+        dashboard._catalogue_cache = None
+        dashboard._catalogue_cache_time = 0.0
+
+    def tearDown(self):
+        self.project_patch.stop()
+        self.temp.cleanup()
+
+    def test_catalogue_keeps_only_conventional_cpp_modules(self):
+        entries = [
+            {"name": "mod-example", "full_name": "owner/mod-example", "default_branch": "main",
+             "topics": ["azerothcore-module"], "description": "Example", "stargazers_count": 4},
+            {"name": "scripts", "full_name": "owner/scripts", "default_branch": "main",
+             "topics": ["azerothcore-lua"], "stargazers_count": 99},
+            {"name": "mod-archived", "full_name": "owner/mod-archived", "default_branch": "main",
+             "topics": ["azerothcore-module"], "archived": True},
+        ]
+        payload = json.dumps({"organizations": {"azerothcore": {"azerothcore-module": entries}}}).encode()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = payload
+
+        with mock.patch.object(dashboard.urllib.request, "urlopen", return_value=response):
+            modules = dashboard.catalogue_modules(force=True)
+
+        self.assertEqual([item["full_name"] for item in modules], ["owner/mod-example"])
+        self.assertFalse(modules[0]["installed"])
+
+    def test_install_is_atomic_and_requires_root_cmake(self):
+        module = {"name": "mod-example", "full_name": "owner/mod-example", "branch": "main",
+                  "source": "https://github.com/owner/mod-example", "description": "", "stars": 1,
+                  "installed": False}
+
+        def fake_run(command, timeout=45, shell=False):
+            staged = Path(command[-1])
+            staged.mkdir(parents=True)
+            (staged / "CMakeLists.txt").write_text("# module", encoding="utf-8")
+            return {"ok": True, "code": 0, "output": "cloned"}
+
+        with mock.patch.object(dashboard, "catalogue_modules", return_value=[module]), \
+                mock.patch.object(dashboard, "run", side_effect=fake_run):
+            result = dashboard.install_catalogue_module("owner/mod-example")
+
+        self.assertTrue(result["ok"], result["output"])
+        self.assertTrue((self.root / "modules" / "mod-example" / "CMakeLists.txt").is_file())
+        self.assertFalse(list((self.root / "modules").glob(".dashboard-install-*")))
+
+    def test_install_refuses_unknown_or_existing_module(self):
+        module = {"name": "mod-example", "full_name": "owner/mod-example", "branch": "main",
+                  "source": "https://github.com/owner/mod-example", "description": "", "stars": 1,
+                  "installed": False}
+        (self.root / "modules" / "MOD-EXAMPLE").mkdir(parents=True)
+        with mock.patch.object(dashboard, "catalogue_modules", return_value=[module]):
+            existing = dashboard.install_catalogue_module("owner/mod-example")
+            unknown = dashboard.install_catalogue_module("attacker/repository")
+        self.assertFalse(existing["ok"])
+        self.assertIn("existe déjà", existing["output"])
+        self.assertFalse(unknown["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
