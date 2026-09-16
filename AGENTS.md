@@ -128,3 +128,7 @@ Avant livraison :
 3. vérifier les commandes lancées ;
 4. vérifier qu'aucune action ne touche aux volumes ou DB de manière destructive ;
 5. mettre à jour `azerothcore-maintenance-guide.html` si le workflow utilisateur change.
+
+
+## IMPORTANT
+(( exemple repo module custom utilisé (placé a la même racine) : https://github.com/lucasdedango/azerothcore-custom-modules.git ))
