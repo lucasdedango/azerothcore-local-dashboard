@@ -331,7 +331,8 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
 
 <section id="updatedashboard">
   <h2>Mettre à jour le dashboard</h2>
-  <p>L'indicateur en haut à droite compare les fichiers locaux à la branche <code>main</code> du dépôt officiel.</p>
+  <p>L'indicateur en haut à droite charge le manifeste contrôlé <code>dashboard-update-manifest.json</code>
+    depuis la branche <code>main</code> du dépôt officiel, puis compare uniquement les fichiers qu'il déclare.</p>
   <ol>
     <li>Cliquer sur <strong>Mettre à jour</strong>.</li>
     <li>Cliquer une seconde fois sur <strong>Confirmer la mise à jour</strong> dans les huit secondes.</li>
@@ -339,8 +340,10 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
   </ol>
   <div class="note">
     Aucune boîte de dialogue n'est affichée. Avant remplacement, les fichiers actuels sont copiés dans
-    <code>dashboard-backups\AAAAmmjj-HHMMSS</code>. Seule la liste fermée des fichiers appartenant au dashboard
-    est remplacée ; les modules, configurations, volumes Docker et bases de données ne sont pas touchés.
+    <code>dashboard-backups\AAAAmmjj-HHMMSS</code>. Le manifeste distant est validé avant toute écriture.
+    L'auto-update ne synchronise jamais automatiquement l'intégralité du dépôt, ni le dossier AzerothCore :
+    seuls les fichiers déclarés sont remplacés ; les modules, configurations, volumes Docker et bases de données
+    ne sont pas touchés.
   </div>
 </section>
 

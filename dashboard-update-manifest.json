@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "dashboard-update-manifest.json",
+      "description": "Source de vérité des fichiers autorisés pour l'auto-update.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "dashboard.bat",
+      "description": "Lance le dashboard local sous Windows.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "dashboard_server.py",
+      "description": "Backend HTTP local du dashboard.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "dashboard.html",
+      "description": "Interface web locale du dashboard.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "README.md",
+      "description": "Documentation d'installation et inventaire du dashboard.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "rebuild.bat",
+      "description": "Point d'entrée Windows de la reconstruction AzerothCore.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "rebuild-azerothcore.ps1",
+      "description": "Script PowerShell de reconstruction d'AzerothCore.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "patch-and-rebuild.ps1",
+      "description": "Applique les patchs Playerbots prévus puis lance la reconstruction.",
+      "update_policy": "replace"
+    },
+    {
+      "path": "azerothcore-maintenance-guide.html",
+      "description": "Guide HTML des workflows de maintenance du serveur.",
+      "update_policy": "replace"
+    }
+  ]
+}
