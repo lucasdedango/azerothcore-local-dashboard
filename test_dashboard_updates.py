@@ -29,8 +29,11 @@ class DashboardUpdateTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.project_patch = mock.patch.object(dashboard, "PROJECT_ROOT", self.root)
         self.project_patch.start()
+        self.branches_patch = mock.patch.object(dashboard, "dashboard_branches", return_value=["main", "test-ui"])
+        self.branches_patch.start()
 
     def tearDown(self):
+        self.branches_patch.stop()
         self.project_patch.stop()
         self.temp.cleanup()
 
@@ -110,6 +113,23 @@ class DashboardUpdateTests(unittest.TestCase):
         backup = Path(result["backup"])
         self.assertEqual((backup / "dashboard.html").read_bytes(), b"old-dashboard.html")
         self.assertFalse((backup / "nouveau-script.ps1").exists())
+
+    def test_return_to_main_removes_files_added_by_test_branch(self):
+        test_remote = self.archive((("prototype.html", "Écran expérimental."),))
+        main_remote = self.archive()
+        with mock.patch.object(dashboard, "github_archive", return_value=test_remote):
+            switched = dashboard.install_dashboard_update("test-ui")
+        self.assertTrue(switched["ok"], switched["output"])
+        self.assertTrue((self.root / "prototype.html").is_file())
+
+        with mock.patch.object(dashboard, "github_archive", return_value=main_remote):
+            restored = dashboard.install_dashboard_update("main")
+
+        self.assertTrue(restored["ok"], restored["output"])
+        self.assertEqual(restored["removed_files"], ["prototype.html"])
+        self.assertFalse((self.root / "prototype.html").exists())
+        self.assertEqual(json.loads((self.root / dashboard.UPDATE_STATE).read_text())["branch"], "main")
+        self.assertEqual((Path(restored["backup"]) / "prototype.html").read_bytes(), b"new-prototype.html")
 
     def test_unsafe_paths_are_refused(self):
         unsafe = [

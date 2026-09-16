@@ -29,6 +29,7 @@ DASHBOARD_REPO = "lucasdedango/azerothcore-local-dashboard"
 MODULES_REPO = "lucasdedango/azerothcore-custom-modules"
 GITHUB_BRANCH = "main"
 UPDATE_MANIFEST = "dashboard-update-manifest.json"
+UPDATE_STATE = ".dashboard-update-state.json"
 REQUIRED_DASHBOARD_FILES = frozenset((
     UPDATE_MANIFEST,
     "dashboard_server.py",
@@ -39,6 +40,7 @@ SUPPORTED_UPDATE_POLICIES = frozenset(("replace",))
 MAX_UPDATE_FILES = 100
 MAX_UPDATE_BYTES = 10 * 1024 * 1024
 MAX_MANIFEST_BYTES = 256 * 1024
+MAX_BRANCHES = 100
 FORBIDDEN_UPDATE_ROOTS = frozenset((
     "modules", "env", "config-backups", "dashboard-backups", "module-backups",
     "docker", "docker-data", "data", "mysql-data",
@@ -71,6 +73,44 @@ def run(cmd, timeout=45, shell=False):
         return {"ok": False, "code": -1, "output": str(e)}
 
 
+def _valid_branch_name(branch):
+    return (isinstance(branch, str) and 0 < len(branch) <= 200
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", branch) is not None
+            and ".." not in branch.split("/") and not branch.endswith("/"))
+
+
+def dashboard_branches(force=False):
+    """Return the repository branches exposed by GitHub, with main first."""
+    url = f"https://api.github.com/repos/{DASHBOARD_REPO}/branches?per_page={MAX_BRANCHES}"
+    request = urllib.request.Request(url, headers={
+        "User-Agent": "AzerothCore-Local-Dashboard",
+        "Accept": "application/vnd.github+json",
+    })
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = response.read(512 * 1024 + 1)
+    if len(payload) > 512 * 1024:
+        raise RuntimeError("Liste des branches GitHub trop volumineuse.")
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Réponse GitHub invalide: {e}") from e
+    if not isinstance(data, list):
+        raise RuntimeError("GitHub n'a pas renvoyé de liste de branches.")
+    names = sorted({item.get("name") for item in data if isinstance(item, dict)
+                    and _valid_branch_name(item.get("name"))})
+    if GITHUB_BRANCH not in names:
+        raise RuntimeError(f"La branche principale {GITHUB_BRANCH!r} est introuvable.")
+    return [GITHUB_BRANCH] + [name for name in names if name != GITHUB_BRANCH]
+
+
+def _require_dashboard_branch(branch):
+    if not _valid_branch_name(branch):
+        raise RuntimeError("Nom de branche invalide.")
+    if branch not in dashboard_branches():
+        raise RuntimeError("Branche absente de la liste publiée par GitHub.")
+    return branch
+
+
 def github_archive(repo, branch=GITHUB_BRANCH, force=False):
     """Return a GitHub branch archive without extracting untrusted paths."""
     key = (repo, branch)
@@ -80,7 +120,7 @@ def github_archive(repo, branch=GITHUB_BRANCH, force=False):
         if cached and not force and now - cached[0] < UPDATE_CACHE_SECONDS:
             return cached[1]
 
-    url = f"https://codeload.github.com/{repo}/zip/refs/heads/{branch}"
+    url = f"https://codeload.github.com/{repo}/zip/refs/heads/{urllib.parse.quote(branch, safe='/')}"
     request = urllib.request.Request(url, headers={"User-Agent": "AzerothCore-Local-Dashboard"})
     with urllib.request.urlopen(request, timeout=20) as response:
         payload = response.read(25 * 1024 * 1024 + 1)
@@ -104,9 +144,9 @@ def github_archive(repo, branch=GITHUB_BRANCH, force=False):
     return files
 
 
-def dashboard_update_archive(force=False):
+def dashboard_update_archive(branch=GITHUB_BRANCH, force=False):
     """Download and validate the remote manifest, returning only its files."""
-    archive = github_archive(DASHBOARD_REPO, force=force)
+    archive = github_archive(DASHBOARD_REPO, branch=branch, force=force)
     raw_manifest = archive.get(UPDATE_MANIFEST)
     if raw_manifest is None:
         raise RuntimeError(f"Manifeste distant absent: {UPDATE_MANIFEST}")
@@ -144,7 +184,7 @@ def dashboard_update_archive(force=False):
         parts = PurePosixPath(name).parts
         if ".." in parts or "." in parts or not parts:
             raise RuntimeError(f"Chemin non sûr refusé: {name}")
-        if parts[0].casefold() in FORBIDDEN_UPDATE_ROOTS:
+        if parts[0].casefold() in FORBIDDEN_UPDATE_ROOTS or name.casefold() == UPDATE_STATE.casefold():
             raise RuntimeError(f"Répertoire protégé refusé dans le manifeste: {name}")
         destination = (root / Path(*parts)).resolve()
         if destination == root or root not in destination.parents:
@@ -222,8 +262,20 @@ def _git_module_status(module_path):
         raise RuntimeError(f"Git {module_path.name}: {e}") from e
 
 
-def dashboard_update_status():
-    remote = dashboard_update_archive()
+def _dashboard_update_state():
+    try:
+        data = json.loads((PROJECT_ROOT / UPDATE_STATE).read_text(encoding="utf-8"))
+        if (isinstance(data, dict) and _valid_branch_name(data.get("branch"))
+                and isinstance(data.get("managed_files"), list)):
+            return data
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        pass
+    return {"branch": GITHUB_BRANCH, "managed_files": []}
+
+
+def dashboard_update_status(branch=GITHUB_BRANCH):
+    _require_dashboard_branch(branch)
+    remote = dashboard_update_archive(branch=branch)
     changed = [name for name, content in remote.items() if not _same_file(PROJECT_ROOT / name, content)]
     return {
         "ok": True,
@@ -231,6 +283,8 @@ def dashboard_update_status():
         "changed_files": changed,
         "compared_files": len(remote),
         "repository": f"https://github.com/{DASHBOARD_REPO}",
+        "branch": branch,
+        "installed_branch": _dashboard_update_state()["branch"],
     }
 
 
@@ -533,18 +587,33 @@ def remove_local_module(name, remove_configs=False, remove_sql=False, confirmati
         _module_operation_lock.release()
 
 
-def install_dashboard_update():
-    """Replace only dashboard-owned files, with a complete rollback on failure."""
+def install_dashboard_update(branch=GITHUB_BRANCH):
+    """Install one published branch and remove files owned only by the prior branch."""
     if not _dashboard_update_lock.acquire(blocking=False):
         return {"ok": False, "code": -1, "output": "Une mise à jour est déjà en cours."}
     try:
-        remote = dashboard_update_archive(force=True)
+        branch = _require_dashboard_branch(branch)
+        remote = dashboard_update_archive(branch=branch, force=True)
+        state = _dashboard_update_state()
+        previous_files = set()
+        for name in state.get("managed_files", []):
+            if not isinstance(name, str):
+                continue
+            parts = PurePosixPath(name).parts
+            candidate = (PROJECT_ROOT / Path(*parts)).resolve() if parts else PROJECT_ROOT
+            if (parts and ".." not in parts and "." not in parts
+                    and parts[0].casefold() not in FORBIDDEN_UPDATE_ROOTS
+                    and candidate != PROJECT_ROOT and PROJECT_ROOT in candidate.parents):
+                previous_files.add(name)
+        removed = sorted(previous_files - set(remote))
 
-        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         backup = PROJECT_ROOT / "dashboard-backups" / stamp
         stage = Path(tempfile.mkdtemp(prefix="ac-dashboard-update-"))
         replaced = []
         existed = {}
+        state_path = PROJECT_ROOT / UPDATE_STATE
+        old_state = state_path.read_bytes() if state_path.is_file() else None
         try:
             for name, content in remote.items():
                 staged = stage / name
@@ -552,6 +621,12 @@ def install_dashboard_update():
                 staged.write_bytes(content)
             backup.mkdir(parents=True, exist_ok=False)
             existed = {name: (PROJECT_ROOT / name).is_file() for name in remote}
+            for name in removed:
+                destination = PROJECT_ROOT / name
+                if destination.is_file():
+                    saved = backup / name
+                    saved.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(destination, saved)
             for name in remote:
                 destination = PROJECT_ROOT / name
                 saved = backup / name
@@ -561,6 +636,12 @@ def install_dashboard_update():
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 replaced.append(name)
                 os.replace(stage / name, destination)
+            for name in removed:
+                (PROJECT_ROOT / name).unlink(missing_ok=True)
+            new_state = {"version": 1, "branch": branch, "managed_files": sorted(remote)}
+            staged_state = stage / UPDATE_STATE
+            staged_state.write_text(json.dumps(new_state, indent=2) + "\n", encoding="utf-8")
+            os.replace(staged_state, state_path)
         except Exception:
             for name in reversed(replaced):
                 saved = backup / name
@@ -569,17 +650,30 @@ def install_dashboard_update():
                     shutil.copy2(saved, destination)
                 elif not existed.get(name):
                     destination.unlink(missing_ok=True)
+            for name in removed:
+                saved = backup / name
+                if saved.is_file():
+                    destination = PROJECT_ROOT / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(saved, destination)
+            if old_state is None:
+                state_path.unlink(missing_ok=True)
+            else:
+                state_path.write_bytes(old_state)
             raise
         finally:
             shutil.rmtree(stage, ignore_errors=True)
 
         with _archive_cache_lock:
-            _archive_cache.pop((DASHBOARD_REPO, GITHUB_BRANCH), None)
+            _archive_cache.pop((DASHBOARD_REPO, branch), None)
+        removed_text = f" {len(removed)} fichier(s) propre(s) à l'ancienne branche supprimé(s)." if removed else ""
         return {
             "ok": True,
             "code": 0,
-            "output": f"Dashboard mis à jour. Sauvegarde: {backup}\nRedémarrez le dashboard pour charger le nouveau backend.",
+            "output": f"Dashboard mis à jour depuis {branch}.{removed_text} Sauvegarde: {backup}\nRedémarrez le dashboard pour charger le nouveau backend.",
             "backup": str(backup),
+            "branch": branch,
+            "removed_files": removed,
             "restart_required": True,
         }
     except Exception as e:
@@ -974,13 +1068,22 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/updates":
             try:
+                branch = q.get("branch", [GITHUB_BRANCH])[0]
                 return self.send_json({
                     "ok": True,
-                    "dashboard": dashboard_update_status(),
+                    "dashboard": dashboard_update_status(branch),
                     "modules": module_update_statuses(),
                 })
             except Exception as e:
                 return self.send_json({"ok": False, "output": f"Vérification impossible: {e}"}, 502)
+
+        if u.path == "/api/dashboard/branches":
+            try:
+                state = _dashboard_update_state()
+                return self.send_json({"ok": True, "branches": dashboard_branches(),
+                                       "main": GITHUB_BRANCH, "installed": state["branch"]})
+            except Exception as e:
+                return self.send_json({"ok": False, "output": f"Branches indisponibles: {e}"}, 502)
 
         if u.path == "/api/modules/catalogue":
             try:
@@ -1054,7 +1157,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/dashboard/update":
             if data.get("confirmed") is not True:
                 return self.send_json({"ok": False, "output": "Confirmation explicite manquante."}, 400)
-            result = install_dashboard_update()
+            result = install_dashboard_update(str(data.get("branch", GITHUB_BRANCH)))
             return self.send_json(result, 200 if result["ok"] else 500)
 
         if u.path == "/api/modules/install":

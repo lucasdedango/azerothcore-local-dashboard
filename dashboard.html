@@ -14,7 +14,7 @@ button,.btn{position:relative}.tab{border:1px solid var(--line);background:#1019
 section{display:none}section.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}.two{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:0 8px 30px #0004}.card h2,.card h3{margin:0 0 8px}
 .statusrow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #223040}.dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:7px;background:#667}.dot.ok{background:var(--green)}.dot.bad{background:var(--red)}
-.updatebar{display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--line);border-radius:11px;background:#101923}.dot.warn{background:var(--orange)}.module-list{display:grid;gap:8px;margin-top:12px}.module-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border:1px solid #26374b;background:#0d151e;border-radius:10px}.module-meta{font-size:12px;color:var(--muted);word-break:break-all}.state{white-space:nowrap}.btn:disabled{opacity:.55;cursor:not-allowed}
+.updatebar{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:7px 9px;border:1px solid var(--line);border-radius:11px;background:#101923}.updatebar select{max-width:210px}.dot.warn{background:var(--orange)}.module-list{display:grid;gap:8px;margin-top:12px}.module-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border:1px solid #26374b;background:#0d151e;border-radius:10px}.module-meta{font-size:12px;color:var(--muted);word-break:break-all}.state{white-space:nowrap}.btn:disabled{opacity:.55;cursor:not-allowed}
 .catalogue-controls{display:flex;gap:8px}.catalogue-controls input{flex:1;min-width:0;background:#0b121a;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px}.catalogue-list{max-height:480px;overflow:auto}.module-description{margin-top:4px;color:var(--muted);font-size:12px}.module-row .actions{flex:0 0 auto}.catalogue-list .module-row{flex-wrap:wrap}.catalogue-list .module-row .actions{width:100%;justify-content:flex-end;flex-wrap:wrap}
 .actions,.toolbar{display:flex;flex-wrap:wrap;gap:8px}.btn{display:inline-block;text-decoration:none;border:1px solid #33465b;background:#182536;color:#e8f0f8;padding:9px 12px;border-radius:9px;cursor:pointer}.btn:hover{background:#22344a}.btn.warn{border-color:#6e562e}.btn.danger{border-color:#6b3139}
 pre,.console{background:#070b10;border:1px solid #1e2a38;border-radius:11px;padding:12px;color:#cfe3f9;white-space:pre-wrap;overflow:auto;font-family:Consolas,monospace;max-height:430px}
@@ -30,7 +30,7 @@ select,input,textarea{background:#0b121a;border:1px solid #2b3b4e;color:#eef4fa;
 <header>
 <div><h1>AzerothCore Local Dashboard</h1><div class="sub">C:\azerothcore-playerbots · Docker Desktop · Playerbots</div></div>
 <div class="topright">
-<div class="updatebar"><span id="dashboardUpdateState"><i class="dot"></i>Vérification…</span><button id="dashboardUpdateButton" class="btn" data-tip="Télécharge la version main officielle, sauvegarde les fichiers actuels puis met à jour uniquement les fichiers du dashboard." onclick="requestDashboardUpdate()" disabled>Mettre à jour</button></div>
+<div class="updatebar"><span id="dashboardUpdateState"><i class="dot"></i>Branches…</span><select id="dashboardBranch" aria-label="Branche du dashboard" data-tip="Choisit une branche publiée à comparer et à installer. La branche main permet de revenir à la version principale." onchange="selectDashboardBranch()" disabled><option>Chargement…</option></select><button id="dashboardUpdateButton" class="btn" data-tip="Sauvegarde les fichiers actuels puis installe uniquement les fichiers autorisés par le manifeste de la branche choisie." onclick="requestDashboardUpdate()" disabled>Mettre à jour</button></div>
 <div class="toplinks">
 <a href="/docs/commands" target="_blank">📌 Commandes joueur</a>
 <a href="/docs/maintenance" target="_blank">📘 Guide maintenance</a>
@@ -182,24 +182,30 @@ async function api(url,opt){
 function show(o){$('#output').textContent=o.output??JSON.stringify(o,null,2)}
 async function act(name){$('#output').textContent='Exécution…';const o=await api('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});show(o);setTimeout(refreshStatus,700)}
 async function refreshStatus(){const s=await api('/api/status');const names=['ac-database','ac-authserver','ac-worldserver'];$('#services').innerHTML=`<div class="statusrow"><span>Docker Engine</span><span><i class="dot ${s.docker?'ok':'bad'}"></i>${s.docker?'OK':'OFF'}</span></div>`+names.map(n=>{const x=s.services[n];return `<div class="statusrow"><span>${n}</span><span><i class="dot ${x.running?'ok':'bad'}"></i>${x.running?'RUNNING':(x.exists?'STOPPED':'ABSENT')}</span></div>`}).join('')}
-let updatesLoaded=false,updateArmedUntil=0;
+let updatesLoaded=false,updateArmedUntil=0,mainDashboardBranch='main',installedDashboardBranch='main';
+async function loadDashboardBranches(){
+  const select=$('#dashboardBranch');
+  try{const o=await api('/api/dashboard/branches');if(!o.ok)throw new Error(o.output||'Branches indisponibles');mainDashboardBranch=o.main;installedDashboardBranch=o.installed;select.innerHTML=o.branches.map(b=>`<option value="${escAttr(b)}">${esc(b)}${b===o.main?' (principale)':''}${b===o.installed?' — installée':''}</option>`).join('');select.value=o.installed&&o.branches.includes(o.installed)?o.installed:o.main;select.disabled=false;await refreshUpdates(true)}catch(e){select.innerHTML='<option>Indisponible</option>';$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Branches indisponibles';$('#dashboardUpdateState').title=e.message}
+}
+function selectDashboardBranch(){updatesLoaded=false;updateArmedUntil=0;$('#dashboardUpdateButton').classList.remove('warn');refreshUpdates(true)}
 async function refreshUpdates(force=false){
   if(updatesLoaded&&!force)return;updatesLoaded=true;
   const state=$('#dashboardUpdateState'),button=$('#dashboardUpdateButton'),modules=$('#moduleUpdates');
   state.innerHTML='<i class="dot"></i>Vérification…';if(modules)modules.innerHTML='<div class="muted">Vérification…</div>';
   try{
-    const o=await api('/api/updates');if(!o.ok)throw new Error(o.output||'Erreur inconnue');
-    const d=o.dashboard;state.innerHTML=`<i class="dot ${d.up_to_date?'ok':'warn'}"></i>${d.up_to_date?'Dashboard à jour':'Mise à jour disponible'}`;
+    const branch=$('#dashboardBranch').disabled?mainDashboardBranch:$('#dashboardBranch').value;const o=await api('/api/updates?branch='+encodeURIComponent(branch));if(!o.ok)throw new Error(o.output||'Erreur inconnue');
+    const d=o.dashboard;installedDashboardBranch=d.installed_branch;state.innerHTML=`<i class="dot ${d.up_to_date&&d.branch===d.installed_branch?'ok':'warn'}"></i>${d.up_to_date&&d.branch===d.installed_branch?'Dashboard à jour':(d.branch===mainDashboardBranch&&d.installed_branch!==mainDashboardBranch?'Retour à main disponible':'Version à installer')}`;
     state.title=d.changed_files?.length?`Fichiers différents : ${d.changed_files.join(', ')}`:'Tous les fichiers suivis correspondent à la version distante.';
-    button.disabled=d.up_to_date;button.textContent='Mettre à jour';updateArmedUntil=0;
+    button.disabled=d.up_to_date&&d.branch===d.installed_branch;button.textContent=d.branch===mainDashboardBranch&&d.installed_branch!==mainDashboardBranch?'Revenir à main':'Mettre à jour';updateArmedUntil=0;
     if(modules)modules.innerHTML=(o.modules||[]).map(m=>{const known=m.up_to_date!==null;const cls=!known?'':(m.up_to_date?'ok':'warn');const label=!known?'Source inconnue':(m.up_to_date?'À jour':(m.installed?'Différent':'Non installé'));return `<div class="module-row"><div><strong>${esc(m.name)}</strong><div class="module-meta">${esc(m.source)}${m.branch?' · '+esc(m.branch):''}</div></div><div class="actions"><span class="state"><i class="dot ${cls}"></i>${label}</span>${m.installed&&known&&!m.up_to_date?`<button class="btn warn" data-tip="Sauvegarde la version locale complète puis la remplace par la version distante vérifiée. Aucun SQL, config ou rebuild n'est lancé." onclick='updateModule(${JSON.stringify(m.name)},this)'>Mettre à jour</button>`:''}${m.installed?`<button class="btn danger" data-tip="Prépare la suppression du dossier, de ses configs actives et, en option, de son SQL de désinstallation." onclick='removeModule(${JSON.stringify(m.name)},this)'>Supprimer…</button>`:''}</div></div>`}).join('')||'<div class="muted">Aucun module détecté.</div>';
   }catch(e){updatesLoaded=false;state.innerHTML='<i class="dot bad"></i>Vérification impossible';state.title=e.message;button.disabled=true;if(modules)modules.innerHTML=`<div class="notice">${esc(e.message)}</div>`}
 }
 async function requestDashboardUpdate(){
-  const button=$('#dashboardUpdateButton'),now=Date.now();
+  const button=$('#dashboardUpdateButton'),branch=$('#dashboardBranch').value,now=Date.now();
+  if(now>updateArmedUntil&&!confirm(`Installer la branche « ${branch} » ?\n\nUne sauvegarde complète des fichiers gérés sera créée.${branch===mainDashboardBranch?' Les fichiers ajoutés par la branche de test et suivis par son manifeste seront supprimés.':''}`))return;
   if(now>updateArmedUntil){updateArmedUntil=now+8000;button.textContent='Confirmer la mise à jour';button.classList.add('warn');setTimeout(()=>{if(Date.now()>updateArmedUntil){button.textContent='Mettre à jour';button.classList.remove('warn')}},8100);return}
   updateArmedUntil=0;button.disabled=true;button.textContent='Mise à jour…';
-  try{const o=await api('/api/dashboard/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');$('#dashboardUpdateState').innerHTML='<i class="dot ok"></i>Redémarrage requis';$('#dashboardUpdateState').title=o.output+' Fermez la console du dashboard puis relancez dashboard.bat pour charger le nouveau backend.';button.textContent='Relancer dashboard.bat';button.disabled=true;button.classList.remove('warn')}catch(e){button.disabled=false;button.textContent='Réessayer';button.classList.remove('warn');$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Mise à jour échouée';$('#dashboardUpdateState').title=e.message}
+  try{const o=await api('/api/dashboard/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true,branch})});if(!o.ok)throw new Error(o.output||'Échec de la mise à jour');$('#dashboardUpdateState').innerHTML='<i class="dot ok"></i>Redémarrage requis';$('#dashboardUpdateState').title=o.output+' Fermez la console du dashboard puis relancez dashboard.bat pour charger le nouveau backend.';button.textContent='Relancer dashboard.bat';button.disabled=true;$('#dashboardBranch').disabled=true;button.classList.remove('warn')}catch(e){button.disabled=false;button.textContent='Réessayer';button.classList.remove('warn');$('#dashboardUpdateState').innerHTML='<i class="dot bad"></i>Mise à jour échouée';$('#dashboardUpdateState').title=e.message}
 }
 let catalogue=[],catalogueLoaded=false;
 async function loadCatalogue(force=false){
@@ -272,7 +278,7 @@ async function loadOverride(){const o=await api('/api/override');$('#overrideRaw
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function escAttr(s){return esc(s)}
 refreshStatus();
-refreshUpdates();
+loadDashboardBranches();
 </script>
 </body>
 </html>
