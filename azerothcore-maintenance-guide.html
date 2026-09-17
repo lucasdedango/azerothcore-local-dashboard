@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Maintenance AzerothCore Playerbots</title>
+  <title>Guide de maintenance · AzerothCore Local Dashboard</title>
   <style>
     :root{
-      --bg:#0b1020; --panel:#11182c; --panel2:#171f36; --text:#eef2ff; --muted:#9ba7c4;
-      --accent:#7dd3fc; --accent2:#a78bfa; --ok:#86efac; --warn:#fde68a; --bad:#fda4af;
+      --bg:#071018; --panel:#0d1924; --panel2:#122231; --text:#eef2ff; --muted:#9ba7c4;
+      --accent:#5ee1d4; --accent2:#6db7ff; --ok:#86efac; --warn:#fde68a; --bad:#fda4af;
       --border:#26314e; --code:#070b14;
     }
     *{box-sizing:border-box}
@@ -88,18 +88,24 @@
 </head>
 <body>
 <header>
-  <h1>Maintenance AzerothCore · Playerbots</h1>
+  <h1>AzerothCore · Maintenance &amp; Dashboard</h1>
   <div class="subtitle">
-    Mémo local pour le serveur <strong>C:\azerothcore-playerbots</strong> :
-    démarrage, arrêt, logs, console, recompilation, modules, SQL et dépannage courant.
+    Guide opérationnel du serveur <strong>C:\azerothcore-playerbots</strong> : utilisez d’abord le dashboard local pour les actions bornées, puis les commandes manuelles pour contrôler et diagnostiquer.
   </div>
-  <span class="badge">Solo / petit groupe · Docker Desktop · AzerothCore WotLK</span>
+  <span class="badge">Interface locale · 127.0.0.1:8765 · Docker Desktop · AzerothCore WotLK</span>
 </header>
 
 <div class="app">
 <nav>
-  <div class="level">Niveau 1 · Basique</div>
-  <button class="tab active" data-target="start">▶ Démarrer / arrêter</button>
+  <div class="level">Dashboard local</div>
+  <button class="tab active" data-target="dashboard-guide">🖥 Tour du dashboard</button>
+  <button class="tab" data-target="decision">🧭 Choisir une action</button>
+  <button class="tab" data-target="config-editor">✏ Éditeur de configs</button>
+  <button class="tab" data-target="module-manager">🧩 Gestion des modules</button>
+  <button class="tab" data-target="safety">🛡 Sécurité &amp; backups</button>
+
+  <div class="level">Commandes de secours</div>
+  <button class="tab" data-target="start">▶ Démarrer / arrêter</button>
   <button class="tab" data-target="status">● Vérifier l'état</button>
   <button class="tab" data-target="logs">📜 Logs</button>
   <button class="tab" data-target="console">⌨ Console serveur</button>
@@ -122,7 +128,80 @@
 </nav>
 
 <main>
-<section id="start" class="active">
+<section id="dashboard-guide" class="active">
+  <h2>Le dashboard est le point d’entrée</h2>
+  <p class="muted">Lancer <code>dashboard.bat</code>, conserver sa console ouverte, puis utiliser <code>http://127.0.0.1:8765/</code>. Le serveur Python reste lié uniquement à l’ordinateur local.</p>
+  <div class="grid">
+    <div class="card"><h3>Dashboard</h3><p>État de Docker et des conteneurs, démarrage, arrêt, restart, recreate, rebuild, patchs et dernière sortie.</p></div>
+    <div class="card"><h3>Configs</h3><p>Fichiers hôte et configs actives du conteneur, en texte brut ou en formulaire <code>clé = valeur</code>.</p></div>
+    <div class="card"><h3>Compose override</h3><p>Recherche d’options AzerothCore et ajout contrôlé de variables <code>AC_*</code>, avec validation et rollback.</p></div>
+    <div class="card"><h3>Logs</h3><p>100 ou 300 lignes, rafraîchissement automatique toutes les cinq secondes et suivi live dans une vraie console.</p></div>
+    <div class="card"><h3>Modules &amp; dossiers</h3><p>Catalogue, état, installation, mise à jour et suppression assistées, plus accès aux dossiers de sauvegarde.</p></div>
+    <div class="card"><h3>Fonctions prévues</h3><p>Cette page est une feuille de route. Une carte affichée ici n’est pas encore une fonction active.</p></div>
+  </div>
+  <h3>Démarrage quotidien</h3>
+  <ol><li>Démarrer Docker Desktop et attendre que son moteur soit prêt.</li><li>Double-cliquer sur <code>dashboard.bat</code>.</li><li>Dans <strong>État serveur</strong>, cliquer <strong>Actualiser</strong>, puis <strong>Démarrer</strong>.</li><li>Contrôler <code>ac-database</code>, <code>ac-authserver</code> et <code>ac-worldserver</code>, puis lire les dernières lignes de logs.</li></ol>
+  <div class="note"><strong>Arrêter seulement le dashboard :</strong> <span class="kbd">Ctrl+C</span> dans sa console. Cela n’arrête pas les conteneurs. Le bouton <strong>Arrêter</strong> exécute <code>docker compose stop</code> et conserve conteneurs et volumes.</div>
+  <div class="danger"><strong>Jamais <code>docker compose down -v</code>.</strong> Les volumes peuvent contenir les comptes, personnages et mondes. Aucun workflow normal de ce dashboard ne demande leur suppression.</div>
+</section>
+
+<section id="decision">
+  <h2>Choisir la bonne action</h2>
+  <p>Restart, recreate et rebuild ne sont pas interchangeables. Choisir l’opération minimale réduit les interruptions et le risque.</p>
+  <table><tr><th>Changement</th><th>Bouton</th><th>Effet réel</th></tr>
+    <tr><td>Démarrer les services</td><td><strong>Démarrer</strong></td><td><code>docker compose up -d</code>.</td></tr>
+    <tr><td>Arrêter proprement</td><td><strong>Arrêter</strong></td><td><code>docker compose stop</code>, sans suppression.</td></tr>
+    <tr><td>Config active <code>.conf</code></td><td><strong>Restart world</strong></td><td>Redémarre seulement <code>ac-worldserver</code>.</td></tr>
+    <tr><td>Variable <code>AC_*</code> / override</td><td><strong>Recreate world</strong></td><td>Recrée le worldserver pour charger son environnement.</td></tr>
+    <tr><td>C++ d’un module ajouté, retiré ou modifié</td><td><strong>Rebuild AzerothCore</strong></td><td>Lance directement <code>rebuild-azerothcore.ps1</code>.</td></tr>
+    <tr><td>Deux adaptations Playerbots + compilation</td><td><strong>Patch + Rebuild</strong></td><td>Selfbot, puis gather/grindtarget, puis rebuild.</td></tr>
+  </table>
+  <h3>Le rebuild actuel, étape par étape</h3>
+  <ol><li>Vérifie Docker et peut proposer de démarrer Docker Desktop.</li><li>Sauvegarde toutes les configs actives du worldserver.</li><li>Conserve les valeurs existantes et ajoute uniquement les clés nouvelles des <code>.conf.dist</code>.</li><li>Détecte les SQL de modules gérés par l’updater et propose une sauvegarde des quatre bases.</li><li>Propose séparément les scripts PowerShell trouvés dans les modules, désactivés par défaut.</li><li>Construit et recrée uniquement le worldserver, restaure les configs et redémarre.</li><li>Contrôle l’état, les messages de l’updater et les SHA1 SQL enregistrés.</li></ol>
+  <div class="ok">Le helper ne supprime ni ne recrée les volumes. Si le build échoue, les volumes de base existants ne sont pas touchés.</div>
+  <div class="warn">Le bouton Rebuild simple n’applique pas les deux patchs dédiés. Utiliser explicitement <strong>Patch + Rebuild</strong> lorsqu’ils sont requis.</div>
+</section>
+
+<section id="config-editor">
+  <h2>Éditeur de configurations</h2>
+  <p>La liste réunit <code>.env</code>, les fichiers Compose, les configs de modules présentes sur l’hôte et les fichiers <strong>ACTIVE</strong> du conteneur worldserver. <code>docker cp</code> permet aussi de lire un conteneur arrêté.</p>
+  <h3>Workflow recommandé</h3>
+  <ol><li>Choisir la source exacte, puis cliquer <strong>Charger</strong>.</li><li>Modifier le texte brut, ou utiliser la vue visuelle pour les lignes reconnues <code>clé = valeur</code>.</li><li>Après une modification brute, cliquer <strong>Reparser</strong> pour resynchroniser la vue visuelle.</li><li>Cliquer <strong>Sauver</strong>. L’ancien contenu est d’abord copié sous <code>config-backups\dashboard-*</code>.</li><li>Pour une config active, utiliser <strong>Restart world</strong> et vérifier les logs.</li></ol>
+  <div class="warn">Le backup protège le fichier précédent, pas la validité métier d’une valeur. Modifier une option à la fois et lire la première erreur de démarrage.</div>
+  <h3>Compose override assisté</h3>
+  <ol><li>Rechercher une option native dans <strong>Compose override</strong>. La source est <code>worldserver.conf.dist</code>.</li><li>Lire sa description et saisir la valeur souhaitée.</li><li>Cliquer <strong>Ajouter</strong>. Le nom <code>AC_*</code> est calculé par le dashboard.</li><li>L’ancien override est sauvegardé, puis <code>docker compose config</code> est exécuté.</li><li>Si la validation échoue, le contenu précédent est restauré exactement et l’erreur reste visible.</li><li>Si elle réussit, cliquer <strong>Recreate world</strong>.</li></ol>
+  <div class="ok">Ne jamais contourner une erreur YAML. La restauration automatique est précisément là pour empêcher qu’un override invalide reste en place.</div>
+</section>
+
+<section id="module-manager">
+  <h2>Installer, mettre à jour et supprimer un module</h2>
+  <h3>Vérification et catalogue</h3>
+  <p><strong>Revérifier</strong> est en lecture seule. Un clone Git indépendant est comparé à son dépôt propre ; les autres modules connus sont comparés au dépôt custom groupé. Le catalogue conserve seulement les dépôts GitHub de catégorie <code>azerothcore-module</code>, au nom <code>mod-*</code> et avec une structure C++ reconnue.</p>
+  <ol><li>Ouvrir <strong>Catalogue</strong> et <strong>GitHub</strong>, lire le README et les prérequis.</li><li>Installer avec confirmation. Le clone temporaire est validé puis publié atomiquement.</li><li>Traiter explicitement la config et les migrations documentées.</li><li>Lancer <strong>Rebuild AzerothCore</strong> et contrôler les logs.</li></ol>
+  <div class="note">Installer ou mettre à jour ne lance jamais le code du module, son SQL, une modification de config ou le rebuild.</div>
+  <h3>Mise à jour</h3>
+  <p>La version distante est préparée et validée avant remplacement. La version locale complète, modifications non commitées incluses, passe dans <code>module-backups</code>. Elle est restaurée si la publication échoue, mais ses modifications ne sont pas fusionnées dans la nouvelle version.</p>
+  <h3>Suppression assistée</h3>
+  <ol><li>Cliquer <strong>Supprimer…</strong> et examiner le dossier, les configs et le SQL séparément.</li><li>Tout nettoyage SQL est décoché par défaut. Les scripts officiels sont distingués des propositions déduites.</li><li>Une proposition déduite est affichée intégralement, bornée, soumise à une confirmation renforcée et précédée d’un dump des tables concernées.</li><li>Saisir exactement le nom du module. En cas d’échec SQL, le dossier est conservé.</li><li>Après suppression, lancer un rebuild.</li></ol>
+  <div class="danger">Ne jamais conserver une copie sous <code>modules</code> : AzerothCore peut la détecter comme un second module. Utiliser <code>module-backups</code> ou un emplacement externe.</div>
+</section>
+
+<section id="safety">
+  <h2>Sécurité, sauvegardes et limites</h2>
+  <table><tr><th>Dossier</th><th>Créé par</th><th>Contenu</th></tr>
+    <tr><td><code>config-backups</code></td><td>Éditeur / rebuild</td><td>Ancien texte ou configs actives avant modification.</td></tr>
+    <tr><td><code>module-backups</code></td><td>Mise à jour de module</td><td>Version locale complète remplacée.</td></tr>
+    <tr><td><code>db-backups</code></td><td>Rebuild accepté / SQL déduit</td><td>Dumps datés. Ouvrir le dossier ne crée pas un dump.</td></tr>
+    <tr><td><code>dashboard-backups</code></td><td>Auto-update</td><td>Fichiers suivis avant remplacement ou retrait.</td></tr>
+  </table>
+  <ul><li>Vérifier que les fichiers de backup existent et ne sont pas vides.</li><li>Ne jamais confondre sauvegarde de config et sauvegarde de base.</li><li>Ne jamais exécuter un SQL tiers sans lecture et sauvegarde adaptées.</li><li>Ne jamais exposer le serveur HTTP du dashboard sur le réseau.</li><li>Une carte de la page <strong>Fonctions prévues</strong> n’est pas un garde-fou déjà implémenté.</li></ul>
+  <div class="danger">La restauration DB générale n’est pas une fonction active du dashboard. Ne pas improviser une restauration contre une base en cours d’utilisation.</div>
+  <h3>Mettre à jour le dashboard</h3>
+  <p>La liste de branches et l’indicateur d’état ne comparent que les fichiers permis par <code>dashboard-update-manifest.json</code>. Une confirmation en deux clics est requise ; les fichiers remplacés ou retirés sont sauvegardés.</p>
+  <ol><li>Choisir la branche, lancer la mise à jour et relire le résumé.</li><li>Confirmer une seconde fois dans le délai affiché.</li><li>À « Redémarrage requis », fermer la console du dashboard et relancer <code>dashboard.bat</code>.</li></ol>
+  <div class="warn">Rafraîchir le navigateur ne recharge pas le backend Python. Une page plus récente que le backend peut produire des routes introuvables ou des réponses HTML inattendues.</div>
+</section>
+<section id="start">
   <h2>Démarrer / arrêter le serveur</h2>
   <p class="muted">Toujours commencer dans le dossier du projet.</p>
   <pre><button class="copy">Copier</button><code>cd C:\azerothcore-playerbots</code></pre>
@@ -242,61 +321,24 @@ account set gmlevel test 3 -1</code></pre>
 </section>
 
 <section id="sql">
-  <h2>SQL / patches de modules</h2>
-
-  <h3>Appliquer le SQL de notre module de coffre</h3>
-  <pre><button class="copy">Copier</button><code>Get-Content .\modules\mod-mount-chest\sql\install.sql | docker exec -i ac-database mysql -uroot -ppassword acore_world</code></pre>
-
-  <h3>Tester une requête</h3>
-  <pre><button class="copy">Copier</button><code>docker exec ac-database mysql -uroot -ppassword acore_world -e "SELECT entry,name FROM gameobject_template WHERE entry IN (900001,900002,900003);"</code></pre>
-
-  <div class="note">
-    L'avertissement <code>Using a password on the command line interface can be insecure</code> est attendu
-    avec cette méthode locale.
-  </div>
-
-  <div class="danger">
-    Ne jamais supprimer/recréer le volume MySQL pour corriger un simple problème de module.
-  </div>
+  <h2>SQL des modules</h2>
+  <p>Préférer l’updater SQL natif d’AzerothCore et le contrôle effectué par <code>rebuild-azerothcore.ps1</code>. Il détecte les fichiers sous <code>data/sql</code>, laisse le worldserver les appliquer, puis vérifie leur nom et leur SHA1 dans la table <code>updates</code>.</p>
+  <div class="warn">Ne pas copier une commande SQL générique depuis ce guide : la base cible, le schéma et la version du module doivent être vérifiés dans sa documentation.</div>
+  <div class="danger">Ne jamais supprimer/recréer un volume MySQL pour résoudre un problème de module. Pour une désinstallation, utiliser le plan assisté, tout décoché par défaut, et relire chaque proposition.</div>
 </section>
 
 <section id="backup">
-  <h2>Sauvegarder la base</h2>
-
-  <p>Avant une grosse mise à jour, faire au minimum un dump des trois bases principales.</p>
-
-  <pre><button class="copy">Copier</button><code>mkdir C:\azerothcore-backups -ErrorAction SilentlyContinue
-
-docker exec ac-database mysqldump -uroot -ppassword acore_auth &gt; C:\azerothcore-backups\acore_auth.sql
-docker exec ac-database mysqldump -uroot -ppassword acore_characters &gt; C:\azerothcore-backups\acore_characters.sql
-docker exec ac-database mysqldump -uroot -ppassword acore_world &gt; C:\azerothcore-backups\acore_world.sql</code></pre>
-
-  <div class="warn">
-    Pour une sauvegarde importante, dater les fichiers et vérifier qu'ils ne font pas 0 octet.
-  </div>
+  <h2>Sauvegarder les bases</h2>
+  <p>Quand le rebuild détecte du SQL de module, il propose une sauvegarde complète de <code>acore_auth</code>, <code>acore_characters</code>, <code>acore_world</code> et <code>acore_playerbots</code> dans <code>db-backups\&lt;horodatage&gt;</code>.</p>
+  <ol><li>Accepter le démarrage temporaire de la base si elle est arrêtée et qu’un backup est nécessaire.</li><li>Accepter la sauvegarde proposée avant le rebuild.</li><li>Vérifier ensuite que les quatre fichiers existent et ne sont pas vides.</li></ol>
+  <div class="warn">Le bouton <strong>Backups DB</strong> ouvre ou crée seulement le dossier : il ne produit pas de dump. Pour une sauvegarde hors rebuild, utiliser une procédure explicitement adaptée aux identifiants et conteneurs de l’installation.</div>
 </section>
 
 <section id="rebuild">
   <h2>Recompiler le worldserver</h2>
-  <p>À faire après modification du C++ d'un module, ajout/suppression de module ou changement nécessitant une nouvelle image.</p>
-
-  <h3>1. Libérer les ressources</h3>
-  <pre><button class="copy">Copier</button><code>docker stop ac-worldserver ac-authserver</code></pre>
-
-  <h3>2. Compiler</h3>
-  <pre><button class="copy">Copier</button><code>docker compose build ac-worldserver</code></pre>
-
-  <h3>3. Redémarrer avec la nouvelle image</h3>
-  <pre><button class="copy">Copier</button><code>docker compose up -d --force-recreate ac-worldserver ac-authserver</code></pre>
-
-  <h3>4. Contrôler</h3>
-  <pre><button class="copy">Copier</button><code>docker compose ps
-docker compose logs --tail=150 ac-worldserver</code></pre>
-
-  <div class="note">
-    Les Playerbots peuvent faire consommer beaucoup de CPU/RAM au worldserver. Pour une grosse recompilation,
-    il est préférable de couper world/auth mais de laisser MySQL tranquille.
-  </div>
+  <p>Dans le dashboard, cliquer <strong>Rebuild AzerothCore</strong>. Une vraie console Windows lance directement <code>rebuild-azerothcore.ps1</code> afin de conserver les sauvegardes, la fusion prudente des nouvelles clés, les questions interactives et les contrôles SQL.</p>
+  <ol><li>Lire chaque question dans la console au lieu d’accepter mécaniquement.</li><li>Attendre la fin du build et de la recréation du worldserver.</li><li>Contrôler le résumé des configs, des SQL, l’état Compose et les logs proposés.</li></ol>
+  <div class="note">Une compilation manuelle avec seulement <code>docker compose build</code> contourne une partie de ces protections. Le bouton <strong>Patch + Rebuild</strong> applique, dans l’ordre, selfbot puis gather/grindtarget avant d’appeler ce même helper.</div>
 </section>
 
 <section id="modules">
@@ -385,13 +427,8 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
   </ol>
 
   <h3>Sauvegarde correcte d'un module</h3>
-  <pre><button class="copy">Copier</button><code>Copy-Item .\modules\mod-mount-chest C:\mod-mount-chest-backup -Recurse</code></pre>
-
-  <div class="danger">
-    Ne mets pas un dossier comme <code>mod-mount-chest-v1-backup</code> dans <code>.\modules</code>.
-    AzerothCore le considère comme un vrai module et peut générer une erreur de linker
-    <code>undefined reference to Add...Scripts()</code>.
-  </div>
+  <p>Le dashboard place automatiquement l’ancienne version complète dans <code>module-backups</code> lors d’une mise à jour assistée.</p>
+  <div class="danger">Ne jamais laisser une copie de sauvegarde dans <code>.\modules</code>. AzerothCore peut la considérer comme un vrai module et générer une erreur de linker <code>undefined reference to Add...Scripts()</code>.</div>
 </section>
 
 <section id="updatedashboard">
@@ -428,29 +465,9 @@ docker compose logs --tail=150 ac-worldserver</code></pre>
 
 <section id="updatecore">
   <h2>Mettre à jour le core</h2>
-
-  <div class="warn">
-    Pour notre fork Playerbots, éviter de faire un <code>git pull</code> à l'aveugle juste avant de jouer.
-    Faire une sauvegarde DB et vérifier les modules locaux avant.
-  </div>
-
-  <h3>Procédure prudente</h3>
-  <pre><button class="copy">Copier</button><code>cd C:\azerothcore-playerbots
-docker stop ac-worldserver ac-authserver
-git status
-git pull
-git submodule update --init --recursive
-docker compose build ac-worldserver
-docker compose up -d --force-recreate ac-worldserver ac-authserver</code></pre>
-
-  <p>Ensuite contrôler immédiatement :</p>
-  <pre><button class="copy">Copier</button><code>docker compose ps
-docker compose logs --tail=200 ac-worldserver</code></pre>
-
-  <div class="note">
-    Si le fork Playerbots ou un module impose une branche/version spécifique, conserver cette branche.
-    Ne pas mélanger arbitrairement un core master différent avec des modules non compatibles.
-  </div>
+  <p>La mise à jour Git du core n’est pas une action automatisée par ce dashboard. Le fork Playerbots, ses sous-modules et les modules C++ doivent rester sur des versions compatibles.</p>
+  <ol><li>Planifier une interruption et réaliser une sauvegarde DB vérifiée.</li><li>Examiner la branche, le commit, les modifications locales et les notes de migration avant toute fusion.</li><li>Résoudre explicitement les conflits et mettre à jour les sous-modules requis.</li><li>Utiliser ensuite <strong>Rebuild AzerothCore</strong> pour profiter des sauvegardes de config et contrôles du helper.</li><li>Contrôler l’état, les migrations et les logs avant de rouvrir le serveur.</li></ol>
+  <div class="danger">Ne pas lancer un <code>git pull</code> à l’aveugle juste avant une session. Le dashboard ne sauvegarde pas automatiquement le core avant une commande Git manuelle.</div>
 </section>
 
 <section id="problems">
@@ -473,12 +490,12 @@ docker stop ac-worldserver ac-authserver</code></pre>
   <div class="card">
     <h3><code>undefined reference to Addmod_..._backupScripts()</code></h3>
     <p>Un dossier de sauvegarde a probablement été laissé dans <code>.\modules</code>.</p>
-    <pre><button class="copy">Copier</button><code>Move-Item .\modules\mod-mount-chest-v1-backup C:\mod-mount-chest-v1-backup</code></pre>
+    <p>Déplacer le dossier de copie hors de <code>.\modules</code>, par exemple vers <code>module-backups</code>, puis relancer le rebuild.</p>
   </div>
 
   <div class="card">
-    <h3><code>Missing property MountChest...</code></h3>
-    <p>La config du module n'est pas chargée. Vérifier les variables dans <code>docker-compose.override.yml</code>, puis :</p>
+    <h3><code>Missing property ...</code></h3>
+    <p>Une config de module n'est probablement pas chargée. Vérifier sa config active ou ses variables dans <code>docker-compose.override.yml</code>, puis :</p>
     <pre><button class="copy">Copier</button><code>docker compose config
 docker compose up -d --force-recreate ac-worldserver</code></pre>
   </div>
@@ -490,8 +507,8 @@ docker compose up -d --force-recreate ac-worldserver</code></pre>
   </div>
 
   <div class="card">
-    <h3>MySQL : port 3306 déjà utilisé</h3>
-    <p>Notre installation utilise le port hôte <strong>3307</strong> pour éviter le MySQL/MariaDB Windows déjà présent.</p>
+    <h3>Port MySQL déjà utilisé</h3>
+    <p>Contrôler le port effectivement déclaré par les fichiers Compose rendus avec <code>docker compose config</code>. Ne pas modifier au hasard le port interne du service.</p>
   </div>
 </section>
 
@@ -511,8 +528,7 @@ docker compose up -d --force-recreate ac-worldserver</code></pre>
   </div>
 
   <footer>
-    Ce mémo est adapté à notre installation actuelle : Docker Desktop, AzerothCore Playerbots,
-    DB Docker exposée en 3307, modules AHBot / Individual XP / Playerbots / Mount Chest.
+    Guide aligné sur le dashboard local, ses scripts de rebuild et de patch, et son manifeste d’auto-update. Vérifier les particularités de chaque module dans sa documentation.
   </footer>
 </section>
 </main>
